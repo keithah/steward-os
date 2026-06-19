@@ -1,3 +1,10 @@
+---
+title: Issue lifecycle
+layout: default
+parent: Lifecycle
+nav_order: 1
+---
+
 # Issue lifecycle
 
 How a problem travels from "someone mentioned it somewhere" to "filed, triaged, fixed, closed with

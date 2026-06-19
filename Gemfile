@@ -1,0 +1,9 @@
+source "https://rubygems.org"
+
+# GitHub Pages-compatible Jekyll + the just-the-docs theme.
+gem "jekyll", "~> 4.3"
+gem "just-the-docs", "~> 0.10"
+gem "jekyll-remote-theme"
+
+# Windows / JRuby timezone data (harmless elsewhere)
+gem "tzinfo-data", platforms: [:mingw, :mswin, :x64_mingw, :jruby]

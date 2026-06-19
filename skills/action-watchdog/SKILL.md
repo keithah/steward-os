@@ -1,0 +1,42 @@
+---
+name: action-watchdog
+description: Independently fact-check the autonomous actions the system took (issue closes, labels, etc.) against live ground truth, and alarm on any mismatch. Run on a schedule. This is what makes Band-A public actions safe.
+---
+
+# action-watchdog
+
+**When to load:** auditing autonomous actions for correctness. Runs the
+[watchdog pattern](../../docs/playbooks/watchdog-pattern.md). Band A, deterministic, read-only.
+**Build and enable this before promoting any public-write action to Band A.**
+
+## Steps
+
+1. **Read the action ledgers** — the append-only records each autonomous action writes (what it
+   closed, what it labeled). The ledger is the list of *what to check*, never the evidence of
+   correctness.
+2. **Re-verify each action against LIVE ground truth, independently:**
+   - **Autonomous closes:** is the issue still closed? Is the cited PR actually merged and does it
+     still link the issue? Does the cited release tag actually contain the merge commit? Was it
+     reopened with a complaint? → any mismatch = 🔴.
+   - **Autonomous labels:** does every applied label still match its source signal? Did it override
+     a human's label? → mislabel = 🟡 (unless human-applied).
+   - **(Add a check here for every new autonomous action — same change that adds the action.)**
+3. **Classify severities.** 🔴 = correctness failure (an action was *wrong* — act now). 🟡 = drift
+   (stale, reconcile soon).
+4. **Report only on findings.** Silent when all-clear. Route 🔴 to a human immediately; 🟡 to the
+   reconcile queue. (Exception: a dedicated fleet-liveness heartbeat always reports, so its silence
+   is the alarm.)
+5. **Never fix anything.** The watchdog verifies and surfaces; a human (or a separate, itself-watched
+   action) fixes. An auto-fixing watchdog is just another unverified actor.
+
+## Pitfalls
+- **Independence is the whole point** — re-derive correctness from live state, don't trust the
+  action's own success report.
+- **Deterministic, no LLM** where possible — it's comparing recorded actions to live data; no model
+  means no injection surface and no nondeterminism.
+- **Don't let it page on every run** — alarm fatigue defeats it. Silent-on-all-clear.
+
+## Verification
+- Deliberately record a *wrong* action (in a test ledger) and confirm the watchdog flags it 🔴.
+- On a clean state, the watchdog is silent.
+- Every autonomous public action in the system has a corresponding check here.

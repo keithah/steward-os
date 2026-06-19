@@ -1,3 +1,10 @@
+---
+title: Adoption levels
+layout: default
+parent: Reference
+nav_order: 2
+---
+
 # Adoption levels
 
 You don't install this system all at once. Start at the level that matches your trust and your time,

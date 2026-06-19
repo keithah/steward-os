@@ -1,3 +1,10 @@
+---
+title: The watchdog pattern
+layout: default
+parent: Playbooks
+nav_order: 2
+---
+
 # The watchdog pattern
 
 The pattern that makes autonomous action on public surfaces *safe*: an **independent process that

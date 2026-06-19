@@ -1,3 +1,10 @@
+---
+title: Security spine
+layout: default
+parent: Reference
+nav_order: 4
+---
+
 # Security spine — guardrail patterns
 
 The [architecture overview](../architecture/README.md#the-security-spine) states the five spine

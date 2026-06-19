@@ -1,3 +1,9 @@
+---
+title: Architecture
+layout: default
+nav_order: 2
+---
+
 # Architecture — the operating model
 
 This is the heart of the system. Everything else — the lifecycle playbooks, the skills, the

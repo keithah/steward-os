@@ -1,3 +1,10 @@
+---
+title: Anti-patterns
+layout: default
+parent: Reference
+nav_order: 3
+---
+
 # Anti-patterns
 
 The mistakes this system is designed to prevent. Each is something that *feels* efficient and *is* a

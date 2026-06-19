@@ -1,3 +1,10 @@
+---
+title: The triage scoreboard
+layout: default
+parent: Playbooks
+nav_order: 4
+---
+
 # The triage scoreboard
 
 A pile of open pull requests (or issues) is not a plan. The scoreboard turns it into a **ranked,

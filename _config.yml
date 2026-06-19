@@ -1,0 +1,54 @@
+title: Agentic Project System
+description: >-
+  An installable, project-agnostic playbook for running a software project with an AI agent
+  as a genuine co-maintainer — issue triage, PR review, quality gates, community, and the
+  safety model that makes autonomous action trustworthy.
+
+remote_theme: just-the-docs/just-the-docs
+
+# Site
+url: ""
+baseurl: ""
+
+# just-the-docs settings
+search_enabled: true
+search:
+  heading_level: 3
+  previews: 3
+heading_anchors: true
+
+color_scheme: dark
+
+aux_links:
+  "View on GitHub":
+    - "https://github.com/nesquena/agentic_project_system"
+aux_links_new_tab: true
+
+# Footer
+back_to_top: true
+back_to_top_text: "Back to top"
+last_edit_timestamp: false
+
+# Collections / nav are driven by front-matter in each page (nav_order, parent).
+
+# Build
+markdown: kramdown
+kramdown:
+  syntax_highlighter_opts:
+    block:
+      line_numbers: false
+
+plugins:
+  - jekyll-remote-theme
+
+exclude:
+  - skills/
+  - setup/config.template.yaml
+  - README.md
+  - CONTRIBUTING.md
+  - LICENSE
+  - docs/README.md
+  - .github/
+  - vendor/
+  - Gemfile
+  - Gemfile.lock

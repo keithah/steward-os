@@ -1,3 +1,10 @@
+---
+title: Contributor recognition
+layout: default
+parent: Lifecycle
+nav_order: 5
+---
+
 # Contributor recognition
 
 The system's relationship with the people who contribute. Two jobs: **never lose a contributor to

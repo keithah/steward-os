@@ -1,3 +1,10 @@
+---
+title: Pull-request lifecycle
+layout: default
+parent: Lifecycle
+nav_order: 2
+---
+
 # Pull-request lifecycle
 
 How a proposed change travels from "a PR appeared" to "shipped in a release, author credited." This

@@ -1,3 +1,10 @@
+---
+title: Glossary
+layout: default
+parent: Reference
+nav_order: 1
+---
+
 # Glossary
 
 The system's vocabulary, in one place.

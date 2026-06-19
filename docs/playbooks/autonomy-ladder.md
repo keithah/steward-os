@@ -1,3 +1,10 @@
+---
+title: The autonomy ladder
+layout: default
+parent: Playbooks
+nav_order: 1
+---
+
 # The autonomy ladder
 
 How a capability safely climbs from human-gated to fully autonomous. The bands (C → B → A) aren't

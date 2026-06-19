@@ -1,3 +1,10 @@
+---
+title: Designing scheduled jobs
+layout: default
+parent: Playbooks
+nav_order: 3
+---
+
 # Designing scheduled jobs
 
 Most of the autonomous system runs as scheduled jobs (crons). Good ones are quiet, cheap, and

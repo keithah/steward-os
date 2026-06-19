@@ -1,3 +1,10 @@
+---
+title: Community
+layout: default
+parent: Lifecycle
+nav_order: 4
+---
+
 # Community
 
 Chat platforms, social mentions, announcements — the surfaces where the project meets its users.

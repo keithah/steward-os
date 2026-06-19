@@ -1,3 +1,9 @@
+---
+title: Setup interview
+layout: default
+nav_order: 6
+---
+
 # The setup interview
 
 This is how the system wires itself to *your* project. An agent works through these questions with

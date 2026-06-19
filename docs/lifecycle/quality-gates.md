@@ -1,3 +1,10 @@
+---
+title: Quality gates
+layout: default
+parent: Lifecycle
+nav_order: 3
+---
+
 # Quality gates
 
 The layered defense that protects the codebase. The governing principle:
