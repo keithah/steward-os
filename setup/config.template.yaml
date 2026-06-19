@@ -1,0 +1,79 @@
+# Agentic Project System — project configuration
+# Produced by the setup interview (setup/setup-interview.md). Every playbook and skill reads from
+# this file. Fill what applies; leave optional sections blank/"skip" and they stay disabled.
+# NEVER put secrets (tokens, keys) in this file — see `secrets:` below.
+
+project:
+  name: ""                      # one-line description of the project
+  trunk_branch: "main"
+  release_model:
+    style: "tag-per-release"    # tag-per-release | continuous | other
+    changelog_file: "CHANGELOG.md"
+    shipped_means: "tag-exists-and-deployed"   # how "shipped" is verified
+
+repositories:                   # list every repo the project spans
+  - host: "github.com"
+    owner: ""
+    name: ""
+    role: "primary"             # primary | desktop | mobile | docs | site | ...
+    visibility: "public"
+  # - { host: github.com, owner: "", name: "", role: "desktop", visibility: public }
+
+scope:                          # the fit/scope screen — the most important section
+  anchors:                      # a change must serve at least one of these to be in-scope
+    - ""
+  philosophy_veto:              # qualities that disqualify a change even if well-built
+    - ""
+  bypass_scope_gate:            # change classes that skip the scope screen entirely
+    - "bug-fix-on-shipped-feature"
+    - "security-fix"
+    - "reliability-fix"
+
+community:                      # optional — leave platform blank to disable chat monitoring
+  chat:
+    platform: ""                # discord | slack | ... | "" to disable
+    server_id: ""
+    bug_channels: []            # channel ids/names that carry bug reports
+    monitor: true               # read + capture + react; NEVER autonomous text replies
+    capture_reaction: "white_check_mark"
+  mentions_sweep:
+    enabled: false
+    disambiguate_against: ""    # namesake to exclude, if any
+
+ci_and_gates:
+  test_command: ""              # exact command to run the full suite
+  test_runtime_estimate: ""     # rough wall-clock, so jobs budget and never sample
+  ci_present: true
+  code_review_tool: ""          # automated reviewer, if any
+  adversarial_review_tool: ""   # second/independent reviewer, if any
+  visual_preview_tool: ""       # visual/screenshot preview, if any
+  ui_viewports: []              # e.g. ["1280x800", "390x844"] — empty if no UI
+
+autonomy:                       # starting band per action: A | B | C
+  pr_labeling: "B"
+  issue_triage_replies: "B"
+  issue_autoclose: "C"
+  announcements: "C"
+  pr_merge: "B"
+  human_reachable_at: ""        # channel/DM for Band-B decisions and Band-C approvals
+
+secrets:
+  # Secrets live ONLY in a permission-locked file read by helper scripts. Record the PATH here,
+  # never the value. Helpers read it and never return it to the agent's context.
+  credentials_file: ""          # e.g. a locked-down dotenv path
+  execute_contributor_code: false   # if true, a sandbox MUST be configured
+  sandbox_available: false
+
+scheduled_jobs:                 # start with a few; add as you climb the autonomy ladder
+  jobs:
+    - { name: "scoreboard-refresh", every: "2h",  enabled: true,  agent: false }
+    - { name: "chat-monitor",       every: "1h",  enabled: false, agent: true  }
+    - { name: "mentions-sweep",     every: "24h", enabled: false, agent: true  }
+    - { name: "announcements",      every: "8h",  enabled: false, agent: true  }
+    - { name: "label-sync",         every: "4h",  enabled: false, agent: false }
+    - { name: "issue-autoclose",    every: "4h",  enabled: false, agent: false }
+    - { name: "action-watchdog",    every: "6h",  enabled: false, agent: false }
+    - { name: "fleet-heartbeat",    cron:  "30 8 * * *", enabled: false, agent: false }
+  outputs:
+    digest_to: ""                # where routine digests go
+    alarms_to: ""                # where watchdog alarms go (a human)

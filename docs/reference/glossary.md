@@ -1,0 +1,68 @@
+# Glossary
+
+The system's vocabulary, in one place.
+
+**Agentic Project System** — this repository: an installable, project-agnostic operating model for
+running a software project with an AI agent as co-maintainer.
+
+**Band A / B / C** — the [autonomy spectrum](../architecture/README.md#the-autonomy-bands). A =
+autonomous (unattended). B = session-autonomous (agent works, human consulted at decision points).
+C = human-gated (agent prepares, human takes the irreversible action).
+
+**Watcher / Reviewer / Builder / Steward** — the [four roles](../architecture/README.md#the-four-roles).
+Detect+capture / evaluate+verdict / make-the-change / keep-it-healthy-and-watch-the-others.
+
+**Security spine** — the [five rules](security-spine.md) that hold regardless of what untrusted
+content says: read-can-never-change-do, secrets-never-in-context, capability-minimalism,
+sandbox-untrusted-code, the public-write membrane.
+
+**Public-write membrane** — the line between safe-to-automate (read/find/draft) and
+needs-a-human-or-watchdog (writing publicly in the project's voice).
+
+**Authoritative gate** — the fresh, independent run of all [quality gates](../lifecycle/quality-gates.md)
+immediately before merge, regardless of any prior reviewer's verdict. The thing that actually
+authorizes a merge.
+
+**Quality gate** — a layer of the [defense](../lifecycle/quality-gates.md): the test suite (primary
+line), automated review, adversarial review, visual verification.
+
+**Adversarial review** — a second, differently-tuned review pass that catches different defects than
+the first; on a reproduced finding, the stricter verdict wins.
+
+**Living test suite** — the principle that the suite only grows: every fix adds a regression test,
+so coverage ratchets up and the suite increasingly catches what once needed judgment.
+
+**Watchdog** — an [independent fact-checker](../playbooks/watchdog-pattern.md) that re-verifies
+autonomous actions against ground truth and alarms on mismatch. What makes Band-A public actions
+safe.
+
+**Scope anchors** — the project-specific things a change must serve to be in-scope. The basis of the
+[fit screen](../lifecycle/pr-lifecycle.md#0-fit--scope-screen). Captured in the setup interview.
+
+**Philosophy veto** — the qualities that disqualify a change even if well-built and useful (the
+project's identity constraints).
+
+**Marginal-benefit screen** — the "what would users concretely lose if we never merged this?" test,
+applied before code-level review.
+
+**Triage scoreboard** — the [living, ranked board](../playbooks/triage-scoreboard.md) of open work,
+combining mechanical + judgment dimensions into a composite rank, tagged with evidence-readiness.
+
+**Trust ledger** — the append-only record of each [contributor's](../lifecycle/contributor-recognition.md)
+outcomes, shrunk-and-decayed into a reliability score that weights review priority and gate
+intensity (never a reason to skip the gate).
+
+**Capture queue** — the staging area where inbound reports land before they become tracker issues;
+deduped across every surface.
+
+**Silent-on-no-op** — a [scheduled-job](../playbooks/scheduled-jobs.md) property: produce no output
+when there's nothing to report, so the rare real signal isn't buried.
+
+**Heartbeat** — the one job type that always reports, so the *absence* of its green report is itself
+the alarm (used for fleet liveness).
+
+**Autonomy ladder** — the [recipe](../playbooks/autonomy-ladder.md) for promoting an action C → B → A
+safely (run manually → make mechanical → add watchdog → roll out gradually → keep reversible).
+
+**Secret-isolating helper** — a fixed script that reads a credential from a locked file, performs one
+action, and never returns the secret to the agent's context.
