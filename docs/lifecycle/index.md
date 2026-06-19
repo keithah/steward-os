@@ -8,7 +8,7 @@ has_children: true
 # Lifecycle playbooks
 
 How work travels through the project, one area at a time. Each playbook is self-contained: the
-decision states, the [autonomy bands](../architecture/README.md#the-autonomy-bands), and the skills
+decision states, the [autonomy bands](../architecture/index.md#the-autonomy-bands), and the skills
 for that area.
 
 - **[Issue lifecycle](issue-lifecycle.md)** — from a vague chat report to a filed, triaged,

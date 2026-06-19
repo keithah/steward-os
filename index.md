@@ -12,7 +12,7 @@ co-maintainer — issue triage, PR review, quality gates, community, and the saf
 autonomous action trustworthy.
 {: .fs-6 .fw-300 }
 
-[Get started](docs/architecture/README.md){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
+[Get started](docs/architecture/index.md){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [View on GitHub](https://github.com/nesquena/agentic_project_system){: .btn .fs-5 .mb-4 .mb-md-0 }
 
 ---

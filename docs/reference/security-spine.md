@@ -7,7 +7,7 @@ nav_order: 4
 
 # Security spine — guardrail patterns
 
-The [architecture overview](../architecture/README.md#the-security-spine) states the five spine
+The [architecture overview](../architecture/index.md#the-security-spine) states the five spine
 rules. This page is the concrete *how* — the patterns that implement them. They're the difference
 between "an agent that can take autonomous action" and "an agent you can safely leave running."
 

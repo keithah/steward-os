@@ -1,12 +1,12 @@
 # Documentation map
 
 Everything in the system, organized by what you're trying to do. New here? Read the
-[architecture overview](architecture/README.md) first — it's the model everything else applies.
+[architecture overview](architecture/index.md) first — it's the model everything else applies.
 
 ## Architecture — the operating model
 The four ideas the whole system is built on.
 
-- **[Overview](architecture/README.md)** — the four roles, the autonomy bands, the security spine,
+- **[Overview](architecture/index.md)** — the four roles, the autonomy bands, the security spine,
   the guiding principles. Start here.
 - [Security spine reference](reference/security-spine.md) — the concrete guardrail patterns.
 

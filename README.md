@@ -53,7 +53,7 @@ it's what makes running the whole thing unattended *safe*.
 
 ## Start here
 
-1. **Read the [architecture overview](docs/architecture/README.md)** — the four roles, the bands,
+1. **Read the [architecture overview](docs/architecture/index.md)** — the four roles, the bands,
    the security spine. ~15 minutes; everything else builds on it.
 2. **Run the [setup interview](setup/setup-interview.md)** — the agent asks you the questions it
    needs (your repos, chat platform, CI, review tools) and writes your project's config.

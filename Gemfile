@@ -4,6 +4,7 @@ source "https://rubygems.org"
 gem "jekyll", "~> 4.3"
 gem "just-the-docs", "~> 0.10"
 gem "jekyll-remote-theme"
+gem "jekyll-relative-links"
 
 # Windows / JRuby timezone data (harmless elsewhere)
 gem "tzinfo-data", platforms: [:mingw, :mswin, :x64_mingw, :jruby]

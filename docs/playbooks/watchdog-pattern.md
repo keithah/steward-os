@@ -75,4 +75,4 @@ you autonomy you couldn't safely have otherwise.
 ---
 
 _Related: [the autonomy ladder](autonomy-ladder.md) · [scheduled jobs](scheduled-jobs.md) ·
-[architecture: the security spine](../architecture/README.md#the-security-spine)._
+[architecture: the security spine](../architecture/index.md#the-security-spine)._

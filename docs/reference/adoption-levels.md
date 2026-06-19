@@ -13,7 +13,7 @@ and climb. Each level is useful on its own; each builds on the one before.
 ---
 
 ## Level 0 — Read the model, change nothing
-Just internalize the [architecture](../architecture/README.md): the four roles, the bands, the
+Just internalize the [architecture](../architecture/index.md): the four roles, the bands, the
 security spine. Even with zero automation, the mental model improves how you triage by hand. Cost:
 one read. Value: a clearer operating model.
 

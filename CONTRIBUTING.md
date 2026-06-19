@@ -11,7 +11,7 @@ to your project, written up so others can learn).
   specific project's repos, names, paths, channels, or org details. The whole value is generality.
   If you're contributing a pattern you learned on your own project, *strip the specifics* and write
   it as the general case.
-- **It respects the model.** New material should fit the [architecture](docs/architecture/README.md):
+- **It respects the model.** New material should fit the [architecture](docs/architecture/index.md):
   name the role(s), state the band, and honor the security spine. If a contribution proposes
   autonomous public action without a watchdog, it'll be sent back.
 - **It's honest about trade-offs.** This system is opinionated *because* the opinions are

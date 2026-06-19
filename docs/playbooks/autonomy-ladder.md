@@ -68,4 +68,4 @@ That capability earned Band A because it became *mechanical*, *reversible*, *gra
 ---
 
 _Related: [the watchdog pattern](watchdog-pattern.md) · [scheduled jobs](scheduled-jobs.md) ·
-[architecture: the bands](../architecture/README.md#the-autonomy-bands)._
+[architecture: the bands](../architecture/index.md#the-autonomy-bands)._

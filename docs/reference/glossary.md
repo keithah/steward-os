@@ -12,11 +12,11 @@ The system's vocabulary, in one place.
 **Agentic Project System** — this repository: an installable, project-agnostic operating model for
 running a software project with an AI agent as co-maintainer.
 
-**Band A / B / C** — the [autonomy spectrum](../architecture/README.md#the-autonomy-bands). A =
+**Band A / B / C** — the [autonomy spectrum](../architecture/index.md#the-autonomy-bands). A =
 autonomous (unattended). B = session-autonomous (agent works, human consulted at decision points).
 C = human-gated (agent prepares, human takes the irreversible action).
 
-**Watcher / Reviewer / Builder / Steward** — the [four roles](../architecture/README.md#the-four-roles).
+**Watcher / Reviewer / Builder / Steward** — the [four roles](../architecture/index.md#the-four-roles).
 Detect+capture / evaluate+verdict / make-the-change / keep-it-healthy-and-watch-the-others.
 
 **Security spine** — the [five rules](security-spine.md) that hold regardless of what untrusted
