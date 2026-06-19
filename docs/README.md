@@ -1,0 +1,54 @@
+# Documentation map
+
+Everything in the system, organized by what you're trying to do. New here? Read the
+[architecture overview](architecture/README.md) first — it's the model everything else applies.
+
+## Architecture — the operating model
+The four ideas the whole system is built on.
+
+- **[Overview](architecture/README.md)** — the four roles, the autonomy bands, the security spine,
+  the guiding principles. Start here.
+- [Security spine reference](reference/security-spine.md) — the concrete guardrail patterns.
+
+## Lifecycle — end-to-end playbooks
+How work travels through the project, one area at a time. Each is a self-contained playbook with the
+decision states, the bands, and the skills for that area.
+
+- **[Issue lifecycle](lifecycle/issue-lifecycle.md)** — from a vague chat report to a filed,
+  triaged, resolved, closed-with-credit issue.
+- **[Pull-request lifecycle](lifecycle/pr-lifecycle.md)** — capture → fit/scope screen → review →
+  gate → merge → release → close.
+- **[Quality gates](lifecycle/quality-gates.md)** — the layered defense: automated review,
+  adversarial review, the living test suite, visual verification.
+- **[Community](lifecycle/community.md)** — chat monitoring, mentions, announcements; the
+  find/draft-safe vs public-write-gated line.
+- **[Contributor recognition](lifecycle/contributor-recognition.md)** — the trust ledger, the
+  funnel, credit and promotion.
+
+## Playbooks — cross-cutting recipes
+Patterns that span multiple areas.
+
+- **[The autonomy ladder](playbooks/autonomy-ladder.md)** — how to promote an action C → B → A
+  safely.
+- **[The watchdog pattern](playbooks/watchdog-pattern.md)** — independent fact-checking that makes
+  autonomous public action safe.
+- **[Designing scheduled jobs](playbooks/scheduled-jobs.md)** — cron design: silent-on-no-op,
+  deterministic-where-possible, the heartbeat pattern.
+- **[The triage scoreboard](playbooks/triage-scoreboard.md)** — turning a pile of open work into a
+  ranked, evidence-tagged review queue.
+
+## Setup — wire it to your project
+- **[The setup interview](../setup/setup-interview.md)** — the documented question list the agent
+  works through with you.
+- [Config template](../setup/config.template.yaml) — what the interview produces.
+
+## Reference
+- [Glossary](reference/glossary.md) — the system's vocabulary.
+- [Adoption levels](reference/adoption-levels.md) — minimal → full; start small, grow.
+- [Anti-patterns](reference/anti-patterns.md) — the mistakes this system is designed to avoid.
+- [Security spine](reference/security-spine.md) — guardrail patterns in detail.
+
+## Skills
+Loadable agent procedures live in [`skills/`](../skills/) and are linked from the playbook section
+they belong to. Each skill is a focused, runnable procedure; the playbooks are the *why* and the
+skills are the *how*.
