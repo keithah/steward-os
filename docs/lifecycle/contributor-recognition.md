@@ -1,0 +1,58 @@
+# Contributor recognition
+
+The system's relationship with the people who contribute. Two jobs: **never lose a contributor to
+neglect**, and **let trust earned over time make review more efficient.**
+
+> Credit is non-negotiable. A system that forgets to credit contributors loses them — and a project
+> is its contributors.
+
+---
+
+## Credit: the unbreakable rule
+Original authorship is **always** preserved, on every surface:
+- On the branch — fix on the author's branch when you can, or merge with co-author trailers when you
+  can't.
+- In the changelog and release notes — name the contributor.
+- In the closing comment — thank them by handle, name the version their work shipped in.
+
+This holds even when the system did substantial work on top of a contributor's PR (rebased it, fixed
+tests, resolved conflicts). The original author still gets credit; the system's help is additive,
+not a takeover.
+
+## The trust ledger
+Track each contributor's reliability over time as a lightweight, append-only ledger of outcomes:
+- **Positive** — clean ship, shipped-with-minor-fixes, good rework after a bounce.
+- **Negative** — didn't actually fix it, went stale, introduced a regression, critical flaw.
+- **Unscored** — neutral, superseded, shelved, work-in-progress, a concept call.
+
+One event per PR's terminal outcome (a bounce that later converges is *one* good-rework event, not a
+negative then a positive). Apply shrinkage toward a neutral prior so a contributor with one data
+point isn't over-judged, and decay old events so the score reflects *recent* reliability.
+
+**What the score is for:** it weights review *priority* and *gate intensity* — a long-trusted
+contributor's small fix can move faster; a brand-new or low-reliability author's change gets more
+scrutiny. It is an input to triage, never an excuse to skip the authoritative gate. **Every** change
+still passes the gates regardless of who wrote it.
+
+## The contributor funnel
+Recognition is also growth. The same ledger and the community surfaces feed a funnel:
+- surface first-time contributors for a warm welcome and a careful, encouraging review;
+- periodically refresh and celebrate the contributor list (never drop anyone — union with the prior
+  list as a floor; credit even indirectly-merged/cherry-picked work);
+- promote reliable contributors toward more trust over time.
+
+## Bounce with care
+When you send a PR back, the *how* matters for whether the contributor comes back:
+- give an **exact, reproducible fix-spec**, not a vague "needs work";
+- reconcile against the live thread first so you don't pile on duplicate feedback;
+- if the blocker is purely mechanical (a rebase, a couple of test fixes), consider fixing it
+  yourself on their branch instead of bouncing — and still credit them.
+
+---
+
+## Skills for this area
+- `contributor-trust` — log outcomes, compute the trust map, surface it into triage.
+- (Credit handling is woven into `release-pipeline` and `pr-deep-review`.)
+
+_Related: [PR lifecycle](pr-lifecycle.md) · [community](community.md) ·
+[the triage scoreboard](../playbooks/triage-scoreboard.md)._

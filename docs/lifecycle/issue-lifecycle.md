@@ -1,0 +1,84 @@
+# Issue lifecycle
+
+How a problem travels from "someone mentioned it somewhere" to "filed, triaged, fixed, closed with
+credit." The issue tracker is the project's memory; this playbook keeps it accurate and keeps
+reporters feeling heard.
+
+```
+ [conception]  a vague report on chat / the web
+     │  Watcher: capture to a staging queue, dedupe, classify
+     ▼
+ [capture queue]  pre-tracker staging
+     │  Builder/human: investigate, reproduce, draft a clean issue
+     ▼
+ [filed]  a real tracker issue
+     │  Steward: initial reply, label, milestone, "sprint-candidate" if a fix is starting
+     ▼
+ [triaged]
+     │  serious + nobody building it? → Builder opens a PR (enters the PR lifecycle)
+     ▼
+ [fix merged + released]
+     │  Watcher/Steward: confirm fully resolved, close with version + credit
+     ▼
+ [closed with credit]
+```
+
+---
+
+## Capture (Band A)
+The Watcher reads inbound channels, classifies each item (bug / feature / question / noise), and
+captures genuinely-new actionable items to a staging queue. Two rules make capture trustworthy:
+- **Dedupe across every surface before capturing** — the tracker (open *and* closed), the staging
+  queue, and the capture ledger. The same report arriving twice should match an existing reference,
+  not create a duplicate.
+- **Mark what you captured.** Leave a lightweight, visible signal (a "captured" reaction/ack) so the
+  reporter and the maintainer can see it was logged — without the agent writing a full public reply
+  (keep public voice human; see [community](community.md)).
+
+## Investigate & file (Band B → C)
+Before a staging item becomes a tracker issue: reproduce it if possible, check it isn't a duplicate
+or already-fixed, and draft a clean, structured issue. **Filing borderline items is human-gated** —
+a human glances before it lands on the public tracker, because a noisy or wrong issue costs more
+than the few seconds saved.
+
+## Triage (Band A for the safe parts)
+The Steward keeps the tracker healthy:
+- **Initial reply** — a substantive, code-grounded response (or a targeted needinfo question), under
+  a confidence gate: if you can't ground it in actual code, say nothing rather than post a guess.
+- **Label + milestone** — mechanical, reversible metadata. A good candidate for autonomous,
+  deterministic labeling (size, area, type) with a tight allowlist that never overrides a human's
+  label.
+- **Sprint-candidate** — mark confirmed bugs that have a fix starting.
+
+## Fix → resolve
+A serious issue that nobody is building becomes a Builder task → it enters the
+[PR lifecycle](pr-lifecycle.md). The fix, the regression test, and the release all happen there.
+
+## Close with credit (careful — this is irreversible)
+An issue closes when its fix is **provably shipped** and it's **fully resolved** — never partially.
+The safe autonomous gate (Band A *with watchdog*) is mechanically strict:
+- a merged PR explicitly links the issue as closing it, **and**
+- the merge commit is contained in a released tag (provably shipped, not just on the trunk), **and**
+- the issue is **single-surface** — if it enumerates several distinct symptoms, it does *not*
+  auto-close; it routes to a human for full-surface verification, **and**
+- no "still broken" pushback after the fix, and no hold.
+
+Anything short of that stays open and is surfaced to a human. **Under-close rather than mis-close** —
+a wrongly-closed issue erodes reporter trust. Every autonomous close is logged and
+[fact-checked by the watchdog](../playbooks/watchdog-pattern.md).
+
+## The dropped-ball guard
+The most common trust leak is an issue where *you* asked the reporter a question, they answered, and
+then you went silent. Surface these explicitly: an open issue where a maintainer replied, the
+reporter answered after, and no PR exists — sorted by how long they've been waiting. This is a
+pure-detection Band-A signal (never an auto-reply); it just tells the maintainer who to get back to.
+
+---
+
+## Skills for this lifecycle
+- `issue-capture` — Watcher: monitor channels, dedupe, capture, mark.
+- `issue-triage` — Steward: reply, label, milestone, sprint-candidate.
+- `issue-autoclose` — the strict, watchdog-verified shipped-issue closer.
+
+_Related: [PR lifecycle](pr-lifecycle.md) · [community](community.md) ·
+[the watchdog pattern](../playbooks/watchdog-pattern.md)._
