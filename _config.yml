@@ -6,9 +6,9 @@ description: >-
 
 remote_theme: just-the-docs/just-the-docs
 
-# Site
-url: ""
-baseurl: ""
+# Site (project page at https://nesquena.github.io/agentic_project_system)
+url: "https://nesquena.github.io"
+baseurl: "/agentic_project_system"
 
 # just-the-docs settings
 search_enabled: true
