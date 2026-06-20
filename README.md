@@ -19,7 +19,7 @@ wire itself up.
 behalf, with judgment and restraint, and they know which decisions aren't theirs to make. That's
 exactly the posture this system encodes: an agent that does the tireless work of maintenance but
 keeps a human at every irreversible edge. ("Steward" is also one of the system's
-[four roles](docs/architecture/README.md#the-four-roles) — the one that keeps the whole project
+[four roles](docs/architecture/index.md#the-four-roles) — the one that keeps the whole project
 healthy and watches the others. The system is named for it.)
 
 ---
@@ -69,7 +69,7 @@ it's what makes running the whole thing unattended *safe*.
    [community](docs/lifecycle/community.md), [contributor recognition](docs/lifecycle/contributor-recognition.md).
 4. **Load the [skills](skills/)** as you enter each phase.
 
-Full map: **[docs/README.md](docs/README.md)** · Published site: _(GitHub Pages — see repo settings)_
+Full map: **[docs/README.md](docs/README.md)** · Published site: **<https://nesquena.github.io/steward-os/>**
 
 ## Repository layout
 
