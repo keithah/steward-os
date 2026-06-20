@@ -1,4 +1,23 @@
-// Custom style overrides — auto-imported by just-the-docs (no front-matter needed).
+// Custom style overrides — auto-imported by just-the-docs AFTER its dark scheme.
+// Plain CSS overrides only (no @import of theme internals), so this can't break the SCSS build.
+
+// ---- Teal accent on top of the dark scheme --------------------------------
+$accent: #4fd1c5;
+$accent-deep: #0d9488;
+
+a:not(.btn) { color: $accent; }
+.side-bar .nav-list .nav-list-item .nav-list-link.active { color: $accent; }
+.btn-primary {
+  background-color: $accent-deep;
+  background-image: none;
+  color: #04211e;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.25);
+}
+.btn-primary:hover { background-color: lighten($accent-deep, 6%); }
+
+// Softer, bluer page surface than stock near-black.
+body { background-color: #0f1620; }
+.side-bar, .search-input { background-color: #0c121b; }
 
 // ---- Band / role pill labels ----------------------------------------------
 // Usable inline in docs:  <span class="band band-a">Band A</span>
@@ -18,28 +37,27 @@
 .band-c { background: rgba(239, 68, 68, 0.13);  color: #f87171; border-color: rgba(239,68,68,0.4); }
 .role-tag { background: rgba(79, 209, 197, 0.10); color: #7fdbcf; border-color: rgba(79,209,197,0.3); }
 
-// ---- Hero ----------------------------------------------------------------
+// ---- Hero -----------------------------------------------------------------
 .fs-9 { letter-spacing: -0.02em; }
 
-// ---- Blockquotes as soft callouts ----------------------------------------
+// ---- Blockquotes as soft callouts -----------------------------------------
 blockquote {
-  border-left: 3px solid #0d9488;
+  border-left: 3px solid $accent-deep;
   background: rgba(13, 148, 136, 0.06);
   padding: 0.6rem 1rem;
   border-radius: 0 6px 6px 0;
 }
 
-// ---- Tables --------------------------------------------------------------
+// ---- Tables ---------------------------------------------------------------
 table { font-size: 0.85rem; }
 th { background: rgba(79, 209, 197, 0.06); }
 
-// ---- Inline code ---------------------------------------------------------
+// ---- Inline code ----------------------------------------------------------
 code.language-plaintext, code:not([class*="language-"]) {
   color: #7fdbcf;
   background: rgba(79, 209, 197, 0.08);
   border-radius: 4px;
 }
 
-// ---- Nav polish ----------------------------------------------------------
+// ---- Nav polish -----------------------------------------------------------
 .site-title { font-weight: 700; letter-spacing: -0.01em; }
-.btn-primary { box-shadow: 0 1px 0 rgba(0,0,0,0.2); }
