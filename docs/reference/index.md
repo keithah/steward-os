@@ -7,7 +7,14 @@ has_children: true
 
 # Reference
 
-- **[Glossary](glossary.md)** — the system's vocabulary.
-- **[Adoption levels](adoption-levels.md)** — minimal → full; start small, grow.
-- **[Anti-patterns](anti-patterns.md)** — the mistakes this system is designed to avoid.
+Look-it-up material, ordered from orientation to deep guardrails:
+
+- **[Glossary](glossary.md)** — the system's vocabulary in one place.
+- **[FAQ](faq.md)** — short answers to the common adoption questions.
+- **[Adoption levels](adoption-levels.md)** — minimal to full; start small and climb.
+- **[Coding principles](coding-principles.md)** — the craft-level discipline for writing and editing
+  code, the companion to the quality gates.
+- **[Bug-shape catalog](bug-shapes.md)** — the recurring bug classes that pass tests and survive CI,
+  with how to catch each.
+- **[Anti-patterns](anti-patterns.md)** — the tempting shortcuts this system exists to prevent.
 - **[Security spine](security-spine.md)** — the guardrail patterns in detail.

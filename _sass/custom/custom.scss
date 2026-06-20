@@ -59,5 +59,33 @@ code.language-plaintext, code:not([class*="language-"]) {
   border-radius: 4px;
 }
 
+// Fenced code blocks: a soft border + a touch more breathing room.
+div.highlighter-rouge, figure.highlight, pre.highlight {
+  border: 1px solid rgba(79, 209, 197, 0.14);
+  border-radius: 8px;
+}
+
 // ---- Nav polish -----------------------------------------------------------
 .site-title { font-weight: 700; letter-spacing: -0.01em; }
+
+// Active nav item gets a left accent bar so you always know where you are.
+.side-bar .nav-list .nav-list-item .nav-list-link.active {
+  box-shadow: inset 2px 0 0 $accent;
+}
+
+// ---- Links: gentle underline on hover, not by default ---------------------
+a:not(.btn):hover { text-decoration: underline; text-underline-offset: 2px; }
+
+// ---- Horizontal rules as quiet section breaks -----------------------------
+hr {
+  border: 0;
+  height: 1px;
+  background: linear-gradient(to right, rgba(79,209,197,0.35), rgba(79,209,197,0.02));
+  margin: 2rem 0;
+}
+
+// ---- First paragraph after an H1 reads as a standfirst --------------------
+.main-content > h1:first-of-type + p {
+  font-size: 1.05rem;
+  color: #b9c2cc;
+}

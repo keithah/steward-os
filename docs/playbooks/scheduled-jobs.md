@@ -57,7 +57,7 @@ job), not for every cron.
 ## Failure surfacing
 - A job that exits non-zero or times out should *alert*, not fail silently. Silent-on-no-op is for
   *success* with nothing to do — never for errors.
-- Pair long autonomous jobs with completion/▢error notification so a broken job can't hide.
+- Pair long autonomous jobs with a completion or error notification so a broken job can't hide.
 
 ## A good scheduled job, summarized
 > Deterministic if it can be · incremental · idempotent · silent when there's nothing to do · loud

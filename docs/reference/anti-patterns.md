@@ -2,7 +2,7 @@
 title: Anti-patterns
 layout: default
 parent: Reference
-nav_order: 3
+nav_order: 6
 ---
 
 # Anti-patterns
@@ -70,11 +70,40 @@ close; a human (or a ≥90%-confidence, escalation-on-doubt gate) makes it.
 **Dropping a contributor's credit.** Squashing away authorship, forgetting the changelog mention,
 closing without thanks. A project is its contributors; the system that forgets them loses them.
 
+**Crediting the wrong contributor.** Preserving *a* credit isn't enough if it names the wrong person
+— easy to do when changes ship back-to-back and a handle carries over from the previous one.
+Re-derive the credit from the actual author of *this* change, and make every surface (changelog,
+release notes, closing thanks) agree. See [contributor recognition](../lifecycle/contributor-recognition.md#verify-the-credit-is-the-right-person).
+
 **Going silent on a responsive reporter.** You asked, they answered, you never replied. The single
 most common trust leak — [surface it explicitly](../lifecycle/issue-lifecycle.md#the-dropped-ball-guard).
 
 **Closing a partially-resolved issue.** Auto-closing a multi-symptom issue because one symptom
 shipped. Single-surface only for autonomous close; multi-surface goes to a human.
+
+## Code-craft anti-patterns
+
+**Scope creep in a focused change.** "While I'm here" cleanups, renames, and bonus features riding
+along in an unrelated change. Each is an independent regression risk and noise in the review. Keep
+the change surgical; file the cleanup separately. See [coding principles](coding-principles.md#2-surgical-edits-only).
+
+**Stopping at the first green checkmark.** "Tests pass" / "looks right" / "the diff looks correct"
+are not *done* if the real scenario was never exercised in running code. Define the observable "done"
+up front and verify *that*. See [coding principles](coding-principles.md#4-define-done-up-front-then-verify-the-real-thing).
+
+**Changing the producer without checking the consumer.** Swapping a value's source or shape and
+leaving a downstream reader expecting the old form — a clean-looking diff that ships a regression.
+Trace every reader before you change the producer. See [bug-shape catalog](bug-shapes.md#2-producer-changed-consumer-didnt).
+
+**Letting two patterns coexist.** Keeping an old helper and its replacement both live, or
+half-applying a rename. Each path works alone; together they conflict. Pick one, delete the other.
+See [bug-shape catalog](bug-shapes.md#1-runtime-coexistence).
+
+**Blaming the renderer for lost state.** Debugging the view for a data-layer loss. Reload from the
+source of truth first; if it doesn't recover, the bug is in the write path. See [bug-shape catalog](bug-shapes.md#3-persistence-loss-wearing-a-presentation-costume).
+
+**The vacuous test.** A test that can't fail when the implementation is reverted protects nothing and
+gives false confidence. Confirm red-before-green. See [bug-shape catalog](bug-shapes.md#6-the-vacuous-test).
 
 ## Secret & safety anti-patterns
 

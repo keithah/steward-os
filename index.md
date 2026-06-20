@@ -47,8 +47,8 @@ the recipes, and the questions it needs to ask you to wire itself up.
   community, contributor recognition.
 - **[Playbooks](docs/playbooks/)** — cross-cutting recipes: the autonomy ladder, the watchdog
   pattern, scheduled jobs, the triage scoreboard.
-- **[Reference](docs/reference/)** — glossary, adoption levels, anti-patterns, the security spine in
-  detail.
+- **[Reference](docs/reference/)** — glossary, adoption levels, anti-patterns, coding principles,
+  the bug-shape catalog, the security spine, and an FAQ.
 - **[Setup](setup/setup-interview)** — the interview that wires the system to your project.
 
 ## Adopt it gradually

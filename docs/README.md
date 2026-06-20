@@ -46,7 +46,10 @@ Patterns that span multiple areas.
 
 ## Reference
 - [Glossary](reference/glossary.md) — the system's vocabulary.
-- [Adoption levels](reference/adoption-levels.md) — minimal → full; start small, grow.
+- [FAQ](reference/faq.md) — short answers to the common adoption questions.
+- [Adoption levels](reference/adoption-levels.md) — minimal to full; start small, climb.
+- [Coding principles](reference/coding-principles.md) — the craft-level discipline for writing code.
+- [Bug-shape catalog](reference/bug-shapes.md) — recurring bug classes and how to catch each.
 - [Anti-patterns](reference/anti-patterns.md) — the mistakes this system is designed to avoid.
 - [Security spine](reference/security-spine.md) — guardrail patterns in detail.
 

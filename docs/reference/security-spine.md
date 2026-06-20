@@ -2,7 +2,7 @@
 title: Security spine
 layout: default
 parent: Reference
-nav_order: 4
+nav_order: 7
 ---
 
 # Security spine — guardrail patterns

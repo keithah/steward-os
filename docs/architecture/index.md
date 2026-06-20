@@ -155,6 +155,9 @@ told.
   recoverable next tick; a wrong public close or a wrong merge is not. When uncertain, surface to a
   human instead of acting.
 
+The [coding principles](../reference/coding-principles.md) carry these values down to the keystroke
+level — how to write and edit code so it earns the trust the rest of the system extends to it.
+
 ---
 
 _Next: the [lifecycle playbooks](../lifecycle/) apply this model to each area of the project. Or

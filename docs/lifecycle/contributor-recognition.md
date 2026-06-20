@@ -26,6 +26,19 @@ This holds even when the system did substantial work on top of a contributor's P
 tests, resolved conflicts). The original author still gets credit; the system's help is additive,
 not a takeover.
 
+### Verify the credit is the *right* person
+Preserving *a* credit isn't enough if it names the wrong contributor. Crediting the wrong person is a
+distinct, easy failure — especially when several changes ship back-to-back and a handle gets carried
+over from the previous one. A present co-author trailer proves a trailer exists; it does not prove
+the name is correct.
+
+- **Re-derive the credit from the work being shipped**, every release — look up the actual author of
+  *this* change from the source. Never reuse the last release's handle from memory.
+- **Every credit surface must name the same, correct handle**: changelog, release notes, and the
+  closing thank-you. They have to agree.
+- Where you can, make it a check that *fails the release* if a credited handle matches no author of
+  the commits being shipped. This is part of [`release-pipeline`](https://github.com/nesquena/steward-os/blob/main/skills/release-pipeline/SKILL.md).
+
 ## The trust ledger
 Track each contributor's reliability over time as a lightweight, append-only ledger of outcomes:
 - **Positive** — clean ship, shipped-with-minor-fixes, good rework after a bounce.
@@ -59,7 +72,8 @@ When you send a PR back, the *how* matters for whether the contributor comes bac
 
 ## Skills for this area
 - `contributor-trust` — log outcomes, compute the trust map, surface it into triage.
-- (Credit handling is woven into `release-pipeline` and `pr-deep-review`.)
+- `release-pipeline` — preserves attribution at merge and runs the credit-verification gate.
+- (Credit handling is also woven into `pr-deep-review`.)
 
 _Related: [PR lifecycle](pr-lifecycle.md) · [community](community.md) ·
 [the triage scoreboard](../playbooks/triage-scoreboard.md)._

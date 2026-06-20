@@ -7,8 +7,10 @@ they read your project's [`config.yaml`](../setup/config.template.yaml) for the 
 | Skill | Role | Pairs with | Band |
 |---|---|---|---|
 | [`project-system-setup`](project-system-setup/SKILL.md) | Steward | [setup interview](../setup/setup-interview.md) | B |
+| [`coding-principles`](coding-principles/SKILL.md) | Builder | [coding principles](../docs/reference/coding-principles.md) | B |
 | [`pr-triage`](pr-triage/SKILL.md) | Steward/Reviewer | [PR lifecycle](../docs/lifecycle/pr-lifecycle.md) [0]–[2] | B |
 | [`pr-deep-review`](pr-deep-review/SKILL.md) | Reviewer/Builder | [PR lifecycle](../docs/lifecycle/pr-lifecycle.md) [3]–[4] + [quality gates](../docs/lifecycle/quality-gates.md) | B |
+| [`release-pipeline`](release-pipeline/SKILL.md) | Builder/Steward | [PR lifecycle](../docs/lifecycle/pr-lifecycle.md) [5]–[6] + [contributor recognition](../docs/lifecycle/contributor-recognition.md) | B |
 | [`issue-triage`](issue-triage/SKILL.md) | Steward | [issue lifecycle](../docs/lifecycle/issue-lifecycle.md) | A/B |
 | [`triage-scoreboard`](triage-scoreboard/SKILL.md) | Steward | [scoreboard playbook](../docs/playbooks/triage-scoreboard.md) | A |
 | [`action-watchdog`](action-watchdog/SKILL.md) | Steward | [watchdog pattern](../docs/playbooks/watchdog-pattern.md) | A |

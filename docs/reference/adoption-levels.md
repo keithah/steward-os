@@ -2,7 +2,7 @@
 title: Adoption levels
 layout: default
 parent: Reference
-nav_order: 2
+nav_order: 3
 ---
 
 # Adoption levels
