@@ -6,9 +6,9 @@ description: >-
 
 remote_theme: just-the-docs/just-the-docs
 
-# Site (project page at https://nesquena.github.io/agentic_project_system)
+# Site (project page at https://nesquena.github.io/steward-os)
 url: "https://nesquena.github.io"
-baseurl: "/agentic_project_system"
+baseurl: "/steward-os"
 
 # just-the-docs settings
 search_enabled: true
@@ -21,7 +21,7 @@ color_scheme: dark
 
 aux_links:
   "View on GitHub":
-    - "https://github.com/nesquena/agentic_project_system"
+    - "https://github.com/nesquena/steward-os"
 aux_links_new_tab: true
 
 # Footer
