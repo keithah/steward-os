@@ -1,0 +1,45 @@
+// Custom style overrides — auto-imported by just-the-docs (no front-matter needed).
+
+// ---- Band / role pill labels ----------------------------------------------
+// Usable inline in docs:  <span class="band band-a">Band A</span>
+.band, .role-tag {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.08em 0.55em;
+  border-radius: 999px;
+  line-height: 1.5;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.band-a { background: rgba(16, 185, 129, 0.15); color: #4fd1c5; border-color: rgba(16,185,129,0.4); }
+.band-b { background: rgba(234, 179, 8, 0.13);  color: #eab308; border-color: rgba(234,179,8,0.4); }
+.band-c { background: rgba(239, 68, 68, 0.13);  color: #f87171; border-color: rgba(239,68,68,0.4); }
+.role-tag { background: rgba(79, 209, 197, 0.10); color: #7fdbcf; border-color: rgba(79,209,197,0.3); }
+
+// ---- Hero ----------------------------------------------------------------
+.fs-9 { letter-spacing: -0.02em; }
+
+// ---- Blockquotes as soft callouts ----------------------------------------
+blockquote {
+  border-left: 3px solid #0d9488;
+  background: rgba(13, 148, 136, 0.06);
+  padding: 0.6rem 1rem;
+  border-radius: 0 6px 6px 0;
+}
+
+// ---- Tables --------------------------------------------------------------
+table { font-size: 0.85rem; }
+th { background: rgba(79, 209, 197, 0.06); }
+
+// ---- Inline code ---------------------------------------------------------
+code.language-plaintext, code:not([class*="language-"]) {
+  color: #7fdbcf;
+  background: rgba(79, 209, 197, 0.08);
+  border-radius: 4px;
+}
+
+// ---- Nav polish ----------------------------------------------------------
+.site-title { font-weight: 700; letter-spacing: -0.01em; }
+.btn-primary { box-shadow: 0 1px 0 rgba(0,0,0,0.2); }

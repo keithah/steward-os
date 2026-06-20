@@ -137,7 +137,7 @@ up branches/worktrees. The loop is only closed when the contributor has been cre
 - `pr-deep-review` — runs stages [3]–[4]: deep review and the authoritative gate.
 - `release-pipeline` — runs stages [5]–[6]: merge, release, close, credit.
 
-_(Skills live in [`skills/`](../../skills/) and are the runnable form of this playbook.)_
+_(Skills live in [`skills/`](https://github.com/nesquena/agentic_project_system/tree/main/skills) and are the runnable form of this playbook.)_
 
 ---
 

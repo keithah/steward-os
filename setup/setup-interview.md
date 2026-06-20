@@ -7,12 +7,12 @@ nav_order: 6
 # The setup interview
 
 This is how the system wires itself to *your* project. An agent works through these questions with
-you, and the answers produce your project's [config](config.template.yaml) — which then
+you, and the answers produce your project's [config](https://github.com/nesquena/agentic_project_system/blob/main/setup/config.template.yaml) — which then
 parameterizes every playbook and skill.
 
 **How to run it:** point your agent at this file and say *"run the setup interview."* It asks the
 questions below in order, confirms each answer, and writes `config.yaml`. You can also fill the
-[config template](config.template.yaml) by hand. The agent should ask only what it needs, accept
+[config template](https://github.com/nesquena/agentic_project_system/blob/main/setup/config.template.yaml) by hand. The agent should ask only what it needs, accept
 "skip / not yet" for any optional area, and **never guess** — an unanswered question becomes a
 documented TODO, not an assumption.
 
@@ -82,7 +82,7 @@ The system can't screen PRs/issues for fit without knowing what "fits."
 ---
 
 ## What the interview produces
-- A filled **[`config.yaml`](config.template.yaml)** capturing every answer.
+- A filled **[`config.yaml`](https://github.com/nesquena/agentic_project_system/blob/main/setup/config.template.yaml)** capturing every answer.
 - A short **TODO list** of any sections you skipped, so it's clear what's not yet wired.
 - A recommended **starting job set** based on your autonomy posture.
 
@@ -92,5 +92,5 @@ time your project changes; it reconciles rather than overwrites.
 
 ---
 
-_Next: load the [`project-system-setup`](../skills/project-system-setup/SKILL.md) skill, which runs
+_Next: load the [`project-system-setup`](https://github.com/nesquena/agentic_project_system/blob/main/skills/project-system-setup/SKILL.md) skill, which runs
 this interview as a guided procedure._
