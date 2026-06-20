@@ -36,11 +36,10 @@ only one. Only the OS layer → you never learn about app-level wedges or versio
 watchdog → a reboot leaves you down until the next poll, and there's no instant crash-restart.
 
 ### The pre-restart guard (don't restart into a broken state)
-An auto-restarting watchdog must refuse to restart when a restart would make things *worse*: if the
-deploy checkout is mid-operation (mid-rebase / dirty tree / detached to a non-release point), a
-restart could serve broken or half-applied code. The guard: **if the working state is mid-change,
-alert instead of restarting** — a human is likely in the middle of something. Restart only from a
-known-clean state.
+An auto-restarting watchdog must refuse to restart when a restart would make things *worse*. If the
+deployment is mid-change (a partial update, an in-progress operation), a blind restart can serve
+broken or half-applied code. The guard: **if the deploy is in a known-unclean state, alert instead
+of restarting** — a human is probably in the middle of something. Restart only from a clean state.
 
 ---
 
