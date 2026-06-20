@@ -16,3 +16,6 @@ Patterns that span multiple lifecycle areas.
   deterministic-where-possible, the heartbeat pattern.
 - **[The triage scoreboard](triage-scoreboard.md)** — turning a pile of open work into a ranked,
   evidence-tagged review queue.
+- **[Resilience & self-healing](resilience-and-self-healing.md)** — keeping the maintenance system
+  itself healthy: layered supervision (OS + app watchdog), the pre-restart guard, the reconcile
+  pattern for hand-maintained ledgers, and the flake ledger.

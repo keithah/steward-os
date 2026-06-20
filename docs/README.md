@@ -36,6 +36,8 @@ Patterns that span multiple areas.
   deterministic-where-possible, the heartbeat pattern.
 - **[The triage scoreboard](playbooks/triage-scoreboard.md)** — turning a pile of open work into a
   ranked, evidence-tagged review queue.
+- **[Resilience & self-healing](playbooks/resilience-and-self-healing.md)** — layered supervision
+  (OS + app watchdog), the pre-restart guard, the reconcile pattern, and the flake ledger.
 
 ## Setup — wire it to your project
 - **[The setup interview](../setup/setup-interview.md)** — the documented question list the agent

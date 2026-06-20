@@ -31,6 +31,24 @@ the issue tracker, and captures actionable items to the staging queue (→ [issu
 - Multi-product communities: route each channel to the *right* repo/queue. Don't capture reports for
   a product you don't own.
 
+## Confidence-tiered capture → action (the safe way to auto-file)
+Capturing is always safe; *filing an issue to the public tracker from a chat report* is a public
+write, so gate it by **confidence tier** rather than filing everything or nothing:
+- **HIGH** (a concrete, reproducible bug naming a specific surface, that passed dedup) → **auto-file**
+  a privacy-safe issue. Two hard constraints: (1) the issue body is a **structured paraphrase, never
+  the reporter's raw words**, with **no reporter identity** (handle, id, mention, message link,
+  email) — run it through a **fail-closed privacy scrub** that blocks the file if any PII pattern is
+  present ("no clean, no file"); (2) label it for triage + cap the auto-files per run so a busy day
+  can't spray the tracker. Every auto-file is logged and [watchdog](../playbooks/watchdog-pattern.md)-verified.
+- **MEDIUM** (actionable but vaguer, a feature request, or any doubt / scope call) → **draft it and
+  surface to a human to approve** — don't file. The human's one-tap/one-word approval files it.
+- **LOW / noise** → capture-to-queue only (or skip); never file, never ping.
+
+The tiering is what lets you get the latency win (real bugs filed promptly) without the risk
+(autonomously filing junk or leaking a reporter's identity). Feature requests and "does it do X?"
+questions are scope/judgment calls — never auto-filed.
+
+
 ## Mentions sweep (Band A — find + report only)
 A scheduled sweep of the open web (forums, social, blogs, search) for discussion of the project,
 with a disambiguation step (confirm it's *your* project, not a namesake). Output is a curated digest
