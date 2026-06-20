@@ -48,6 +48,33 @@ The tiering is what lets you get the latency win (real bugs filed promptly) with
 (autonomously filing junk or leaking a reporter's identity). Feature requests and "does it do X?"
 questions are scope/judgment calls — never auto-filed.
 
+### The approval channel: a scheduled job notifies, a human reply *acts*
+The MEDIUM/LOW approval has a wiring subtlety worth knowing before you build it. A **scheduled job
+can SEND a message but cannot RECEIVE the answer** — it runs in its own context, detached from the
+live chat connection, so it can't block on or read your reply. The clean pattern that respects this:
+
+1. The scheduled monitor **notifies** — one message per pending item: *"Bug X queued. Reply `file
+   <id>` or `skip <id>`."* It does not wait.
+2. Your **reply is a fresh, live agent turn** on the chat platform (the platform's normal inbound
+   path). *That* turn does the filing — it has the tools and the live connection the cron lacked.
+
+This decoupling (notify-from-the-job, act-on-the-human-reply) is the no-extra-infrastructure way to
+do human-in-the-loop confirmation over chat. Rich interactive widgets (inline buttons) may *render*
+from a job, but a **tap only does something if the platform's connection owner has a handler for it**
+— so unless that's already wired, a typed reply (`file`/`skip`) is the robust, build-nothing path.
+Verify end-to-end with a real item before trusting it — confirm an actual record gets created, not
+just that the message sent.
+
+### Make the action atomic (concurrent writers will bite you)
+The shared queue/ledger that tracks "what's pending / what's been filed" often has **several writers**
+— the periodic monitor, the reply-handler turn, ad-hoc sessions. If each hand-edits the JSON, writes
+get clobbered (a reply-handler's "filed!" bookkeeping vanishes under the monitor's next tick). Two
+fixes, both cheap: (1) do the whole file-on-approval action through **one deterministic, file-locked
+helper** rather than free-hand JSON edits; (2) record the durable audit trail in an **append-only log**
+(one line per action) that no concurrent rewrite can truncate — that log, not the mutable state file,
+is what the [watchdog](../playbooks/watchdog-pattern.md) re-verifies.
+
+
 
 ## Mentions sweep (Band A — find + report only)
 A scheduled sweep of the open web (forums, social, blogs, search) for discussion of the project,

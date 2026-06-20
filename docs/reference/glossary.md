@@ -91,3 +91,12 @@ auto-records only the unambiguous gaps, and surfaces the judgment ones for a hum
 **Confidence-tiered capture→action** — gating an autonomous public write (e.g. filing an issue from
 a chat report) by confidence: HIGH auto-acts (privacy-scrubbed), MEDIUM drafts-for-human-approval,
 LOW captures only.
+
+**Notify-from-job, act-on-reply** — the pattern for human-in-the-loop confirmation over chat: a
+scheduled job can SEND a prompt but can't RECEIVE the answer (it's detached from the live
+connection), so the job notifies and the human's *reply* (a fresh live agent turn) performs the
+action. See [community lifecycle](../lifecycle/community.md#the-approval-channel-a-scheduled-job-notifies-a-human-reply-acts).
+
+**Append-only ledger** — a one-line-per-action log used as the durable audit trail for autonomous
+actions, chosen over a mutable state file because concurrent writers can't truncate it; it's what
+the watchdog re-verifies.

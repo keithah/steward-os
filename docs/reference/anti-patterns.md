@@ -31,6 +31,19 @@ Silent-on-no-op, or you'll miss the tick that mattered.
 **Auto-fixing watchdog.** A watchdog that fixes problems itself is just another unverified actor.
 It verifies and *surfaces*; a human (or a separate, itself-watched action) fixes.
 
+**Expecting a scheduled job to receive a reply.** A cron can send a question but can't read your
+answer — it's detached from the live chat connection. Wire approvals as *notify-from-the-job,
+act-on-the-human-reply* (the reply is a fresh live turn that does the work). Don't build a job that
+"waits for the user to respond."
+
+**Free-hand editing a shared state file from multiple actors.** When a periodic job, a reply-handler,
+and ad-hoc sessions all hand-edit the same JSON, writes get silently clobbered. Route mutations
+through one deterministic, file-locked helper, and keep the durable audit trail in an append-only log.
+
+**Trusting "the message sent" as proof the feature works.** Delivering a prompt is not the same as
+the action completing. Test the loop end-to-end against a real item and confirm the actual artifact
+(the issue, the record) exists — a self-report of success is not verification.
+
 ## Review & quality anti-patterns
 
 **Trusting a self-report as proof.** "Labeled 86 PRs," "looks clean," "tests pass" — these are
