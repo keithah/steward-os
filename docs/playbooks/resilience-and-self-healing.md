@@ -63,22 +63,13 @@ outcomes weren't logged" — detect the gap, auto-close the safe part, surface t
 
 ---
 
-## The flake ledger (make "never tolerate a flake" systematic)
+## Flakes self-heal too
 
-A flaky test — one that fails then passes on re-run — is a **defect**, usually a real race wearing a
-costume. The failure mode is *social*, not technical: a flake gets re-run away in the moment and
-forgotten, so it never gets fixed and erodes trust in the whole suite. The fix is a **ledger that
-won't let it be forgotten**:
-
-- **Log every flake occurrence** (test id + date + signature) whenever one is observed in a gate/CI run.
-- **A test that flakes ≥2× (unresolved) is auto-flagged "root-fix now"** — recurrence is the trigger
-  to stop re-running and start root-causing.
-- **A flake stays open until explicitly resolved** (root-caused + fixed, with the fixing change
-  recorded). It **re-opens automatically if it flakes again** (a regressed fix).
-
-The ledger is the structured tally + the nag; the prose diagnosis of each flake lives wherever your
-team keeps its debugging notes. Together they turn "ugh, flaky again, re-run" into a closed loop that
-drives flakes to zero.
+A recurring flaky test is the test-suite's version of "alive but silently wrong." The mechanism that
+keeps it from being forgotten — a **ledger that logs every flake and flags any test that recurs for
+a root-fix** — is covered under [quality gates → flakes](../lifecycle/quality-gates.md#flakes-never-tolerate-one).
+The resilience point is just that it belongs in the same family as the patterns above: detect, don't
+tolerate, drive to zero.
 
 ---
 

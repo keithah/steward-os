@@ -78,15 +78,8 @@ action, and never returns the secret to the agent's context.
 instant crash-restart, e.g. systemd) and an [app-level health watchdog](../playbooks/resilience-and-self-healing.md)
 (catches alive-but-wedged + version drift, and alerts). Neither alone is sufficient.
 
-**Pre-restart guard** — a check that refuses to auto-restart a service when a restart would serve a
-broken state (deploy checkout mid-change); alerts instead.
-
 **Reconcile pattern** — a scheduled job that diffs a hand-maintained ledger against ground truth,
 auto-records only the unambiguous gaps, and surfaces the judgment ones for a human.
-
-**Flake ledger** — a structured tally of test-flake occurrences that auto-flags any test flaking ≥2×
-(unresolved) as "root-fix now" and won't let it be forgotten; makes "never tolerate a flake"
-[systematic](../playbooks/resilience-and-self-healing.md#the-flake-ledger-make-never-tolerate-a-flake-systematic).
 
 **Confidence-tiered capture→action** — gating an autonomous public write (e.g. filing an issue from
 a chat report) by confidence: HIGH auto-acts (privacy-scrubbed), MEDIUM drafts-for-human-approval,
