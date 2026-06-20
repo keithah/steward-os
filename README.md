@@ -1,19 +1,26 @@
-# Agentic Project System
+# Steward
 
-**A complete, installable playbook for running a software project with an AI agent as a genuine co-maintainer.**
+**An operating model for running a software project with an AI agent as a genuine co-maintainer.**
 
-This repository is not an application. It is a *system* — a set of playbooks, skills, and
-processes that let you drop an agent (or a team of agents) into any software project and have it
-help triage issues, review and merge pull requests, run quality gates, talk to your community, and
-keep the whole machine healthy — at a level of rigor that holds up in a real open-source project.
+Steward is not an application. It is a *system* — a set of playbooks, skills, and processes that let
+you drop an agent (or a team of agents) into any software project and have it help triage issues,
+review and merge pull requests, run quality gates, talk to your community, and keep the whole
+machine healthy — at a level of rigor that holds up in a real open-source project.
 
 It is **project-agnostic by design.** Nothing here is specific to any one codebase. You bring the
-project; the system brings the operating model, the recipes, and the questions it needs to ask you
-to wire itself up.
+project; Steward brings the operating model, the recipes, and the questions it needs to ask you to
+wire itself up.
 
 > If you run an open-source project and you've ever wished you had a tireless, careful co-maintainer
 > who reads every diff, never drops a contributor's question, and gets *more* trustworthy over time
-> instead of less — that's what this system is for.
+> instead of less — that's what Steward is for.
+
+**Why "Steward"?** A steward doesn't own the thing they tend — they care for it on the owner's
+behalf, with judgment and restraint, and they know which decisions aren't theirs to make. That's
+exactly the posture this system encodes: an agent that does the tireless work of maintenance but
+keeps a human at every irreversible edge. ("Steward" is also one of the system's
+[four roles](docs/architecture/README.md#the-four-roles) — the one that keeps the whole project
+healthy and watches the others. The system is named for it.)
 
 ---
 

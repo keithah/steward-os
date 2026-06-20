@@ -9,7 +9,7 @@ nav_order: 1
 
 The system's vocabulary, in one place.
 
-**Agentic Project System** — this repository: an installable, project-agnostic operating model for
+**Steward** — this repository: an installable, project-agnostic operating model for
 running a software project with an AI agent as co-maintainer.
 
 **Band A / B / C** — the [autonomy spectrum](../architecture/index.md#the-autonomy-bands). A =

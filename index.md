@@ -4,12 +4,12 @@ layout: default
 nav_order: 1
 ---
 
-# Agentic Project System
+# Steward
 {: .fs-9 }
 
-A complete, installable playbook for running a software project with an AI agent as a genuine
-co-maintainer — issue triage, PR review, quality gates, community, and the safety model that makes
-autonomous action trustworthy.
+An operating model for running a software project with an AI agent as a genuine co-maintainer —
+issue triage, PR review, quality gates, community, and the safety model that makes autonomous
+action trustworthy.
 {: .fs-6 .fw-300 }
 
 [Get started](docs/architecture/index.md){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
@@ -24,6 +24,12 @@ at a level of rigor that holds up in a real open-source project.
 
 It is **project-agnostic by design.** You bring the project; the system brings the operating model,
 the recipes, and the questions it needs to ask you to wire itself up.
+
+> **Why "Steward"?** A steward doesn't own what they tend — they care for it on the owner's behalf,
+> with judgment and restraint, and they know which decisions aren't theirs to make. That's the
+> posture this system encodes: an agent that does the tireless work of maintenance but keeps a human
+> at every irreversible edge. (It's also one of the system's four roles — the one that keeps the
+> project healthy and watches the others.)
 
 ## The core idea
 

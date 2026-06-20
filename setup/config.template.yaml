@@ -1,4 +1,4 @@
-# Agentic Project System — project configuration
+# Steward — project configuration
 # Produced by the setup interview (setup/setup-interview.md). Every playbook and skill reads from
 # this file. Fill what applies; leave optional sections blank/"skip" and they stay disabled.
 # NEVER put secrets (tokens, keys) in this file — see `secrets:` below.

@@ -1,6 +1,6 @@
 ---
 name: project-system-setup
-description: Run the setup interview to wire the Agentic Project System to a specific project. Use when first installing the system, or when the project's repos/platforms/CI change. Produces config.yaml.
+description: Run the setup interview to wire Steward to a specific project. Use when first installing the system, or when the project's repos/platforms/CI change. Produces config.yaml.
 ---
 
 # project-system-setup

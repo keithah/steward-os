@@ -1,8 +1,8 @@
-title: Agentic Project System
+title: Steward
 description: >-
-  An installable, project-agnostic playbook for running a software project with an AI agent
-  as a genuine co-maintainer — issue triage, PR review, quality gates, community, and the
-  safety model that makes autonomous action trustworthy.
+  Steward — an operating model for running a software project with an AI agent as a co-maintainer.
+  Issue triage, PR review, quality gates, community, and the safety model that makes autonomous
+  action trustworthy. Project-agnostic, installable, with a guided setup interview.
 
 remote_theme: just-the-docs/just-the-docs
 
