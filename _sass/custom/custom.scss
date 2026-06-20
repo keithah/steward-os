@@ -90,12 +90,7 @@ hr {
   color: #b9c2cc;
 }
 
-// ---- Footer: replace the theme's "built with" line ------------------------
-// Hide the default "This site uses Just the Docs…" text and show our own.
-.site-footer { font-size: 0; }
-.site-footer a { display: none; }
-.site-footer::after {
-  content: "Steward — an operating model for AI-assisted project maintenance. MIT licensed.";
-  font-size: 0.75rem;
-  color: #6b7682;
-}
+// ---- Footer ---------------------------------------------------------------
+// The "built with" line is replaced at the source via _includes/nav_footer_custom.html.
+.site-footer, footer .d-md-none { font-size: 0.75rem; color: #6b7682; }
+.site-footer a, footer .d-md-none a { color: #7fdbcf; }
