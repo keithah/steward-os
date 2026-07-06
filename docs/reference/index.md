@@ -1,7 +1,7 @@
 ---
 title: Reference
 layout: default
-nav_order: 5
+nav_order: 6
 has_children: true
 ---
 
@@ -18,3 +18,5 @@ Look-it-up material, ordered from orientation to deep guardrails:
   with how to catch each.
 - **[Anti-patterns](anti-patterns.md)** — the tempting shortcuts this system exists to prevent.
 - **[Security spine](security-spine.md)** — the guardrail patterns in detail.
+- **[Steward on Steward](steward-on-steward.md)** - the config and pull requests behind this repo,
+  with an honest split of what's live vs. aspirational.
