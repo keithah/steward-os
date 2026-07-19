@@ -7,7 +7,7 @@ nav_order: 9
 
 # Security spine — guardrail patterns
 
-The [architecture overview](../architecture/index.md#the-security-spine) states the five spine
+The [architecture overview](../architecture/index.md#the-security-spine) states the six spine
 rules. This page is the concrete *how* — the patterns that implement them. They're the difference
 between "an agent that can take autonomous action" and "an agent you can safely leave running."
 
@@ -68,6 +68,78 @@ Never an *unverified* autonomous public write. This is why autonomous labeling a
 this system are deterministic (no-LLM), reversible, *and* watchdogged — and why autonomous public
 *replies* are deliberately not built (drafting is fine; sending stays human).
 
+## 6. The vulnerability divert
+The confidence-tiered capture path ([community](../lifecycle/community.md#confidence-tiered-capture--action-the-safe-way-to-auto-file),
+[issues](../lifecycle/issue-lifecycle.md)) can auto-file a concrete, reproducible bug to the
+**public** tracker. That is exactly the shape of a vulnerability report, so the security check runs
+**before** confidence tiering and short-circuits it: a suspected vulnerability never enters the
+HIGH/MEDIUM/LOW tiers at all.
+
+**The detector (generic signal, never codebase knowledge).** A project-agnostic Watcher can't read
+your code, so it decides on three signal classes — **any one** trips the divert:
+1. **Reporter intent** — worded or flagged as security: "vuln," "exploit," "CVE," "RCE,"
+   "SQLi/XSS/SSRF/CSRF," "auth bypass," "privilege escalation," "exposed credentials/secrets/tokens,"
+   "DoS/denial of service," "PoC," "responsible disclosure."
+2. **Impact shape** — describes unauthorized access, data exposure, unauthorized state modification
+   (tampering), code execution, or attacker-triggerable service loss *regardless of vocabulary* ("I
+   can read other users' invoices by changing the id" trips on shape alone; so does "I can change
+   another account's email" or "one crafted request takes the whole service down"). Note the line
+   against ordinary bugs: a plain crash on bad input is *not* a vuln by shape — availability trips
+   only when the loss is **attacker-triggerable** (a crafted or amplified request, not any exception).
+3. **Configured sensitive surfaces** — a report naming a surface in the adopter's
+   `security_sensitive_surfaces` list (e.g. `auth`, `payments`, `crypto`) is suspected until a human
+   clears it.
+
+The detector **routes, it never confirms** — confirmation and disclosure are human decisions on the
+private path. Detection is high-recall by design (over-divert): the cost of a false positive is a
+human's private glance; the cost of a false negative is a public exploit leak.
+
+**Three entry points, one gate.** The divert runs at *every* point where a vulnerability can reach
+the public tracker:
+- **Capture / auto-file** — before confidence tiering, as above, *and before any public "captured"
+  reaction is left* (the reaction is itself a partial disclosure).
+- **A public issue opened directly** — a reporter who skips the private path and files on the tracker.
+  Run the same detector at triage: on a hit, the agent posts **no** substantive public reply and no
+  label commentary (a code-grounded reply publicly confirms exploitability), routes the item to the
+  private path, and leaves the next move — lock, minimize, edit, coordinate an advisory — to a human.
+- **A public pull request** — a "fix" whose description, diff, or linked issue reveals a live
+  vulnerability (a PoC, an exploit path, an unfixed sibling). Run the detector at PR intake, before
+  any public review comment: on a hit, post no substantive public review that confirms the
+  exploit, route it to the private path, and let a human decide (coordinate a private fix, a security
+  advisory, then merge). A public code review that says "this exploit works" is the same leak as a
+  public issue reply.
+
+**The divert.** On a hit:
+- Produce a **PII-scrubbed structured summary** (the same fail-closed scrub the HIGH tier uses) and
+  send it **privately** to the configured `security_contact` (a person, a private channel, an email,
+  or a GitHub private security advisory).
+- The reporter gets only a **neutral private acknowledgement** ("received — handling this
+  privately"). Leave **no public "captured" reaction**: a visible reaction on a public channel is
+  itself a partial disclosure ("there's a live bug here").
+
+**Fail closed when unconfigured.** The divert must always have a *private* terminal destination. If
+`security_contact` is unset, suppress the auto-file and route the scrubbed summary to the human alarms
+channel; if that too is unset, hold it in the private pull index (which must never live on a public
+surface) and raise setup. The absence of configuration must **never** fall back to public-filing, and
+never to a silent "acknowledged" that reached no human — so an adopter enabling autonomous capture
+should be required to set at least one private destination (`security_contact` or the alarms channel)
+first.
+
+**How the rule behaves (the acceptance cases):**
+
+| Report | Result | Why |
+|---|---|---|
+| "auth bypass on `/login` — I can log in as anyone" | **divert** | reporter intent + impact shape |
+| "I can read other users' invoices by changing the `id`" | **divert** | impact shape, no keyword needed |
+| "I can edit another account's email from my session" | **divert** | impact shape — unauthorized state modification (tampering) |
+| "one crafted request pins the CPU and takes the service down for everyone" | **divert** | impact shape — attacker-triggerable availability loss |
+| "app crashes on empty input, repro attached" | HIGH (normal tiering) | concrete + reproducible, no security signal (a plain crash isn't attacker-leveraged) |
+| "crash when I submit the password-reset form" | **divert** | names a sensitive surface (auth) if configured — over-divert |
+| "typo in the README" | LOW (normal tiering) | no security signal |
+| a vuln opened *directly* as a public issue | **divert at triage** | no code-grounded public reply; route private, human decides lock/edit/advisory |
+| a vuln arriving as a public PR ("fix" whose diff/description shows the exploit) | **divert at PR intake** | no public review that confirms the exploit; human coordinates a private fix + advisory |
+| divert hit, `security_contact` unset | **suppress + alarms channel** | fail-closed invariant (never public, never a silent no-op) |
+
 ---
 
 ## A quick self-test for any new autonomous capability
@@ -75,9 +147,10 @@ this system are deterministic (no-LLM), reversible, *and* watchdogged — and wh
 - Does it need a secret? → secret-isolating helper, never in context.
 - Does it run untrusted code? → sandbox, fail-closed, or don't.
 - Does it write to a public surface? → human (C) or watchdog'd-mechanical (A), never unverified.
+- Could the content be a security vulnerability? → divert to the private path, never the public tracker.
 - Can it be undone? → if not, it doesn't belong in Band A.
 
-If you can't answer all five cleanly, the capability isn't ready for autonomy yet.
+If you can't answer all six cleanly, the capability isn't ready for autonomy yet.
 
 _Related: [autonomy ladder](../playbooks/autonomy-ladder.md) · [watchdog pattern](../playbooks/watchdog-pattern.md)
 · [anti-patterns](anti-patterns.md)._

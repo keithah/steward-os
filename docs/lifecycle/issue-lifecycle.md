@@ -40,9 +40,18 @@ captures genuinely-new actionable items to a staging queue. Two rules make captu
   not create a duplicate.
 - **Mark what you captured.** Leave a lightweight, visible signal (a "captured" reaction/ack) so the
   reporter and the maintainer can see it was logged — without the agent writing a full public reply
-  (keep public voice human; see [community](community.md)).
+  (keep public voice human; see [community](community.md)). **Exception — a suspected vulnerability
+  gets no public mark.** Run the [vulnerability divert](../reference/security-spine.md#6-the-vulnerability-divert)
+  *before* reacting: on a hit, leave no public reaction (a visible mark is itself a partial
+  disclosure) — the reporter gets only the neutral private acknowledgement on the disclosure path.
 
 ## Investigate & file (Band B → C)
+Before any tier decision, apply the [vulnerability divert](../reference/security-spine.md#6-the-vulnerability-divert):
+a suspected vulnerability (unauthorized access, data exposure, tampering, code execution, or
+attacker-triggerable service loss — by wording or shape) is never filed to the public tracker. It
+goes to the private disclosure path; a human decides disclosure. If no private destination is
+configured, it is still suppressed — never a fall-back to public-filing.
+
 Before a staging item becomes a tracker issue: reproduce it if possible, check it isn't a duplicate
 or already-fixed, and draft a clean, structured issue. **Filing borderline items is human-gated** —
 a human glances before it lands on the public tracker, because a noisy or wrong issue costs more
@@ -50,6 +59,11 @@ than the few seconds saved.
 
 ## Triage (Band A for the safe parts)
 The Steward keeps the tracker healthy:
+- **Vulnerability check first** — the [divert](../reference/security-spine.md#6-the-vulnerability-divert)
+  also runs on issues opened *directly* on the public tracker (a reporter who skips the private path).
+  On a hit: **no substantive public reply and no label commentary** — a code-grounded reply would
+  publicly confirm exploitability. Route the item privately to `security_contact` and leave the next
+  move (lock, minimize, edit, advisory) to a human.
 - **Initial reply** — a substantive, code-grounded response (or a targeted needinfo question), under
   a confidence gate: if you can't ground it in actual code, say nothing rather than post a guess.
 - **Label + milestone** — mechanical, reversible metadata. A good candidate for autonomous,
