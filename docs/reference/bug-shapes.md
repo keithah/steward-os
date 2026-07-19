@@ -155,6 +155,90 @@ and a recurring [anti-pattern](anti-patterns.md).)
 
 ---
 
+## 9. The shared helper that deadlocks under a held lock
+
+**Shape:** You widen a fix across sibling call sites by factoring it into one shared helper — the
+right dedupe move. But the call sites differ in whether they *already hold a lock*. The helper
+unconditionally re-acquires a non-reentrant lock, so the caller that already holds it hangs forever.
+
+**Why checks miss it:** A mocked lock in a unit test doesn't block, so every test stays green. The
+deadlock needs a *real* lock object and the specific caller that enters the helper already holding
+it — an integration condition unit tests don't set up.
+
+**Catch it:** When you extract shared code that touches a lock, audit each call site for whether it
+already holds that lock, and make the helper's locking explicit (reentrant, or take-lock vs.
+assume-lock variants). Prove it with a real-object end-to-end run, not a mock.
+
+_Contributed by Teknium — see [reviewing at volume](reviewing-at-volume.md#two-traps-when-you-widen)._
+
+---
+
+## 10. Cleanup at the wrong lifecycle phase
+
+**Shape:** A sibling site *looks* like the same bug as one you just fixed — unbounded growth of a map,
+say — so you add the same cleanup there. But that site is a different lifecycle phase where the state
+is still needed. Pruning per-item state at cache-eviction time is wrong if an evicted item's
+*session* is still alive and rebuilds itself from that state.
+
+**Why checks miss it:** The cleanup looks correct and its immediate test passes — the state does get
+freed. The breakage only appears when something *downstream* tries to read the state after it's been
+pruned, on a path the cleanup test never exercises.
+
+**Catch it:** Before widening a cleanup, grep for where the state is *read* on resume/rebuild.
+"Evicted from cache" and "the work ended" are different lifecycle phases; put the cleanup at the phase
+where the state is provably no longer needed, not at the first phase that resembles the original bug.
+
+_Contributed by Teknium — see [reviewing at volume](reviewing-at-volume.md#two-traps-when-you-widen)._
+
+---
+
+## 11. The stale branch that reverts recent work on merge
+
+**Shape:** You merge a branch cut from an older trunk, and it silently reverts recent work — but
+*only* when a stale copy of an unrelated file is part of the branch's own changes. A normal merge
+(including a squash) is a three-way merge against the merge-base, so a file the branch never touched
+keeps the trunk's newer version. The revert happens when the old copy rides *inside the diff*: an
+agent that committed its whole working tree, a regenerated or vendored artifact, a wholesale file
+rewrite, a conflict resolution that took the branch's side — or a salvage done with non-merge
+mechanics (`git diff main..branch | git apply`, `git checkout branch -- .`) that replays stale
+content wholesale.
+
+**Why checks miss it:** The change under review looks correct and its tests pass. The reverted file
+rides in on the diff as an incidental hunk nobody scrutinizes, or on the merge mechanics of a
+non-standard salvage.
+
+**Catch it:** Scan the branch's changed-file *list* for anything outside the change's stated intent —
+a file the fix had no reason to touch is the red flag (being merely *behind* on untouched files is
+normal and safe). Read the effective diff, not the commit list: a hunk that deletes recent trunk work
+is the tell. Re-fetch the trunk immediately before merge (a green change can be superseded during its
+own CI run by a parallel fix) and preview the merge result; `git log HEAD..origin/main -- <changed
+files>` shows what landed since you branched so you can inspect any overlap.
+
+_Contributed by Teknium — see [reviewing at volume](reviewing-at-volume.md#the-stale-branch-revert)._
+
+---
+
+## 12. The invariant the tests don't encode
+
+**Shape:** A locally-correct diff violates an architectural invariant that no test checks — a cache
+prefix that must stay stable across turns, a message sequence that must alternate roles, an id that
+must be derived deterministically so a content-keyed cache still hits, a cache key that must include
+every identity axis. The change behaves *identically* in every test and breaks (or silently taxes
+everyone) in production.
+
+**Why checks miss it:** The invariant isn't written down as an assertion anywhere, so "passes tests"
+says nothing about it. The cost is often invisible (a cache-hit-rate collapse, a per-request price
+multiplier) rather than a crash.
+
+**Catch it:** Keep a short **invariants list** in the repo's agent-entry file, and require any review
+of a touched subsystem to check the change against it. When you discover a new invariant the hard way,
+add it to the list *and* — where possible — add a test that encodes it so it graduates from tribal
+knowledge to an automatic check.
+
+_Contributed by Teknium — see [reviewing at volume](reviewing-at-volume.md#invariants-a-reviewer-cant-see-in-the-diff)._
+
+---
+
 _How to use this: skim it before a deep review so the shapes are fresh, and add to it when your
 project discovers a new recurring class. A catalog of the bugs that actually bite you is one of the
 highest-leverage documents a project keeps._
