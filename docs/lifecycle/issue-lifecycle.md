@@ -33,8 +33,10 @@ reporters feeling heard.
 ---
 
 ## Capture (Band A)
-The Watcher reads inbound channels, classifies each item (bug / feature / question / noise), and
-captures genuinely-new actionable items to a staging queue. Two rules make capture trustworthy:
+The Watcher reads inbound channels, classifies each item (bug / feature / question / noise), assigns
+a HIGH / MEDIUM / LOW confidence tier, and captures genuinely new actionable items to a staging
+queue. Capture itself never files a tracker issue; the tier controls the downstream filing gate.
+Two rules make capture trustworthy:
 - **Dedupe across every surface before capturing** — the tracker (open *and* closed), the staging
   queue, and the capture ledger. The same report arriving twice should match an existing reference,
   not create a duplicate.
@@ -44,6 +46,8 @@ captures genuinely-new actionable items to a staging queue. Two rules make captu
   gets no public mark.** Run the [vulnerability divert](../reference/security-spine.md#6-the-vulnerability-divert)
   *before* reacting: on a hit, leave no public reaction (a visible mark is itself a partial
   disclosure) — the reporter gets only the neutral private acknowledgement on the disclosure path.
+  Every autonomous normal-capture mark is ledgered and independently
+  [watchdog-verified](../playbooks/watchdog-pattern.md).
 
 ## Investigate & file (Band B → C)
 Before any tier decision, apply the [vulnerability divert](../reference/security-spine.md#6-the-vulnerability-divert):
@@ -62,8 +66,8 @@ The Steward keeps the tracker healthy:
 - **Vulnerability check first** — the [divert](../reference/security-spine.md#6-the-vulnerability-divert)
   also runs on issues opened *directly* on the public tracker (a reporter who skips the private path).
   On a hit: **no substantive public reply and no label commentary** — a code-grounded reply would
-  publicly confirm exploitability. Route the item privately to `security_contact` and leave the next
-  move (lock, minimize, edit, advisory) to a human.
+  publicly confirm exploitability. Route the item through the complete private disclosure path and
+  leave the next move (lock, minimize, edit, advisory) to a human.
 - **Initial reply** — a substantive, code-grounded response (or a targeted needinfo question), under
   a confidence gate: if you can't ground it in actual code, say nothing rather than post a guess.
 - **Label + milestone** — mechanical, reversible metadata. A good candidate for autonomous,
@@ -97,7 +101,7 @@ pure-detection Band-A signal (never an auto-reply); it just tells the maintainer
 ---
 
 ## Skills for this lifecycle
-- `issue-capture` — Watcher: monitor channels, dedupe, capture, mark.
+- `issue-capture` — Watcher: stage non-tracker inbound, dedupe, and mark only after durable capture.
 - `issue-triage` — Steward: reply, label, milestone, sprint-candidate.
 - `issue-autoclose` — the strict, watchdog-verified shipped-issue closer.
 

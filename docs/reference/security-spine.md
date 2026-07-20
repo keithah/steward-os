@@ -123,7 +123,9 @@ channel; if that too is unset, hold it in the private pull index (which must nev
 surface) and raise setup. The absence of configuration must **never** fall back to public-filing, and
 never to a silent "acknowledged" that reached no human — so an adopter enabling autonomous capture
 should be required to set at least one private destination (`security_contact` or the alarms channel)
-first.
+first. A capture pipeline that also writes to the pull index must configure `alarms_to` as an
+independent failure route, even when `security_contact` is present, so an index failure remains
+reportable.
 
 **How the rule behaves (the acceptance cases):**
 
@@ -139,6 +141,7 @@ first.
 | a vuln opened *directly* as a public issue | **divert at triage** | no code-grounded public reply; route private, human decides lock/edit/advisory |
 | a vuln arriving as a public PR ("fix" whose diff/description shows the exploit) | **divert at PR intake** | no public review that confirms the exploit; human coordinates a private fix + advisory |
 | divert hit, `security_contact` unset | **suppress + alarms channel** | fail-closed invariant (never public, never a silent no-op) |
+| divert hit, contact and alarms both unset | **hold in confirmed-private index + raise setup** | emergency terminal fallback; never public, never silently dropped |
 
 ---
 
