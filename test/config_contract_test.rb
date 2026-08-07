@@ -63,3 +63,85 @@ class ExtractLoadTest < Minitest::Test
     end
   end
 end
+
+# --- Phase 1: shape ---
+class ShapeTest < Minitest::Test
+  TEMPLATE = {
+    'project' => { 'name' => '' },
+    'issue_capture' => { 'enabled' => false, 'sources' => [] },
+    'scheduled_jobs' => {
+      'jobs' => [
+        { 'name' => 'a', 'every' => '1h', 'enabled' => false },
+        { 'name' => 'b', 'cron' => '30 8 * * *', 'enabled' => false }
+      ]
+    }
+  }.freeze
+
+  def rules(violations)
+    violations.map(&:rule)
+  end
+
+  def check(config)
+    ConfigContract.check(config: config, template: TEMPLATE)
+  end
+
+  def test_matching_shape_reports_no_shape_violations
+    refute_includes rules(check(TEMPLATE)), :unknown_key
+    refute_includes rules(check(TEMPLATE)), :missing_key
+  end
+
+  def test_unknown_key_is_an_error
+    cfg = Marshal.load(Marshal.dump(TEMPLATE))
+    cfg['issue_captures'] = { 'enabled' => true }
+    v = check(cfg).find { |x| x.rule == :unknown_key }
+    assert_equal :error, v.severity
+    assert_equal 'issue_captures.enabled', v.key
+  end
+
+  def test_missing_key_is_an_error
+    cfg = Marshal.load(Marshal.dump(TEMPLATE))
+    cfg['project'].delete('name')
+    v = check(cfg).find { |x| x.rule == :missing_key }
+    assert_equal :error, v.severity
+    assert_equal 'project.name', v.key
+  end
+
+  def test_populated_list_satisfies_an_empty_template_list
+    cfg = Marshal.load(Marshal.dump(TEMPLATE))
+    cfg['issue_capture']['sources'] = %w[email webform]
+    assert_empty check(cfg).select { |x| %i[unknown_key missing_key].include?(x.rule) }
+  end
+
+  def test_job_with_neither_every_nor_cron_is_an_error
+    cfg = Marshal.load(Marshal.dump(TEMPLATE))
+    cfg['scheduled_jobs']['jobs'][0].delete('every')
+    v = check(cfg).find { |x| x.rule == :job_schedule_alternation }
+    assert_equal :error, v.severity
+    assert_match(/exactly one/, v.message)
+  end
+
+  def test_job_with_both_every_and_cron_is_an_error
+    cfg = Marshal.load(Marshal.dump(TEMPLATE))
+    cfg['scheduled_jobs']['jobs'][0]['cron'] = '0 * * * *'
+    assert_includes rules(check(cfg)), :job_schedule_alternation
+  end
+
+  def test_missing_cron_on_a_job_is_not_a_missing_key
+    cfg = Marshal.load(Marshal.dump(TEMPLATE))
+    cfg['scheduled_jobs']['jobs'] = [{ 'name' => 'a', 'every' => '1h', 'enabled' => false }]
+    assert_empty check(cfg).select { |x| x.rule == :missing_key }
+  end
+
+  def test_non_mapping_document_is_an_error
+    v = ConfigContract.check(config: [], template: TEMPLATE).find { |x| x.rule == :not_a_mapping }
+    assert_equal :error, v.severity
+  end
+
+  def test_shape_error_suppresses_later_phases
+    cfg = Marshal.load(Marshal.dump(TEMPLATE))
+    cfg['bogus'] = 1
+    v = check(cfg)
+    assert_includes rules(v), :unknown_key
+    assert_includes rules(v), :phases_skipped
+  end
+end
