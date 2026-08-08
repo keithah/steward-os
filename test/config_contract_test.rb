@@ -501,3 +501,56 @@ class EntrypointTest < Minitest::Test
     assert_match(/could not read/, out)
   end
 end
+
+# --- Corpus: every rule has a fixture that provokes it ---
+class CorpusTest < Minitest::Test
+  BIN = File.expand_path('../bin/config-lint', __dir__)
+
+  def self.red_fixtures
+    Dir.glob(File.join(FIXTURE_ROOT, 'red-*.yaml')).sort
+  end
+
+  def rules_for(path)
+    template = ConfigContract::Extract.load(
+      File.expand_path('../setup/config.template.yaml', __dir__)
+    )
+    ConfigContract.check(config: ConfigContract::Extract.load(path), template: template)
+                  .select { |v| v.severity == :error }.map(&:rule)
+  end
+
+  def test_the_corpus_is_not_empty
+    assert_operator self.class.red_fixtures.size, :>=, 14,
+                    'red fixtures went missing — the corpus proves nothing if it does not load'
+  end
+
+  def test_green_fixture_passes_through_the_real_entrypoint
+    out = IO.popen([BIN, File.join(FIXTURE_ROOT, 'green-enabled.yaml')], err: [:child, :out], &:read)
+    assert_equal 0, $CHILD_STATUS.exitstatus, out
+  end
+
+  red_fixtures.each do |path|
+    name = File.basename(path, '.yaml')
+    expected = name.sub(/\Ared-/, '').to_sym
+
+    define_method("test_#{name}_provokes_#{expected}") do
+      assert_includes rules_for(path), expected,
+                      "#{name} did not provoke #{expected} — got #{rules_for(path).inspect}"
+    end
+
+    define_method("test_#{name}_exits_nonzero") do
+      IO.popen([BIN, path], err: [:child, :out], &:read)
+      assert_equal 1, $CHILD_STATUS.exitstatus
+    end
+  end
+end
+
+# --- Anti-vacuity: a rule with no fixture fails the suite ---
+class MetaTest < Minitest::Test
+  def test_every_semantic_rule_has_a_red_fixture
+    covered = Dir.glob(File.join(FIXTURE_ROOT, 'red-*.yaml'))
+                 .map { |p| File.basename(p, '.yaml').sub(/\Ared-/, '').to_sym }
+    missing = ConfigContract::SEMANTIC_RULES - covered
+    assert_empty missing,
+                 "these rules have no red fixture, so nothing proves they fire: #{missing.inspect}"
+  end
+end
