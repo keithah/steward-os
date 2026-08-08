@@ -86,11 +86,14 @@ module ConfigContract
       violations.concat(type_violations(config))
     end
 
-    unless violations.any? { |v| v.severity == :error }
-      violations.concat(semantic_violations(config))
-    end
-
-    violations << phases_skipped if violations.any? { |v| v.severity == :error }
+    # `phases_skipped` means "phase 3 never ran", so decide that BEFORE phase 3
+    # appends anything. Testing for errors afterwards would tell an adopter
+    # whose only fault is semantic that the semantic invariants were not
+    # evaluated — false, and in a fail-closed lint actively misleading: they
+    # cannot tell "unvetted, could hide more" from "vetted, here is the fault".
+    ran_semantics = violations.none? { |v| v.severity == :error }
+    violations.concat(semantic_violations(config)) if ran_semantics
+    violations << phases_skipped unless ran_semantics
 
     violations
   end
@@ -247,8 +250,10 @@ module ConfigContract
 
   # No URI scheme, not absolute, not home-relative. Anything else is outside the
   # repo and routes to the unverifiable warning instead of index_not_public.
-  # A Windows-style C:\ path counts as outside — not a supported form, but
-  # calling it repo-relative would produce a false error.
+  # A Windows-style C:\ or C:/ path counts as outside — not a supported form,
+  # but calling it repo-relative would produce a false error. A drive-relative
+  # `C:foo` (no separator after the colon) is not matched by the regex below
+  # and so is still treated as repo-relative; nobody writes that in YAML.
   def self.repo_relative?(path)
     return false if blank?(path)
     return false if path.include?('://') || path.start_with?('/', '~')
@@ -301,6 +306,9 @@ module ConfigContract
       end
     end
 
+    # Deliberately NOT gated on issue_capture.enabled: a stale non-blank marker
+    # left over from a disabled capture config is still a public marker with
+    # no watchdog behind it, and that is exactly what this rule exists to catch.
     unless blank?(marker) || watchdog
       violations << err(:marker_needs_watchdog, 'issue_capture.capture_marker',
                         'a public capture marker requires an enabled action-watchdog job ' \
@@ -321,9 +329,13 @@ module ConfigContract
 
     if monitor && blank?(config.dig('community', 'chat', 'platform'))
       violations << err(:chat_needs_platform, 'community.chat.platform',
-                        'a blank platform means chat monitoring is disabled, but monitor is true')
+                        'a blank platform means chat monitoring is disabled, but monitor is true ' \
+                        '(config.template.yaml:32)')
     end
 
+    # Deliberately NOT gated on issue_capture.enabled either: a positive bound
+    # left set while capture is off still describes an autonomous-filing policy
+    # with no watchdog behind it once capture is re-enabled without review.
     files = config.dig('issue_capture', 'max_public_files_per_run')
     if files.is_a?(Integer) && files.positive? && !watchdog
       violations << err(:public_files_need_watchdog, 'issue_capture.max_public_files_per_run',
@@ -338,31 +350,41 @@ module ConfigContract
                         '(config.template.yaml:106)')
     end
 
-    violations + unverifiable_warning(config, capture, outputs, index)
+    violations + unverifiable_warning(capture, outputs, index)
   end
 
   def self.err(rule, key, message)
     Violation.new(severity: :error, rule: rule, key: key, message: message)
   end
 
+  # Fail closed on "no declared repositories". An adopter who declares none
+  # has unknown visibility, and unknown is exactly the case index_not_public
+  # must resolve pessimistically — the mixed-visibility case already does.
+  # Note phase 1's empty-collection allowance deliberately lets `repositories: []`
+  # through without a missing-key error, so nothing upstream catches this.
   def self.public_repo?(config)
     repos = config['repositories']
-    return false unless repos.is_a?(Array)
+    return true unless repos.is_a?(Array) && repos.any? { |r| r.is_a?(Hash) }
 
     repos.any? { |r| r.is_a?(Hash) && r['visibility'] == 'public' }
   end
 
   # One grouped warning, not one per destination: three separate warnings would
   # fire on every correctly-configured adopter and train them to ignore output.
-  def self.unverifiable_warning(_config, capture, outputs, index)
+  def self.unverifiable_warning(capture, outputs, index)
     return [] unless capture
 
+    undecidable = 'channel privacy not statically decidable'
     unverifiable = []
     unverifiable << "index_path '#{index}' (outside the repo)" if !blank?(index) && !repo_relative?(index)
-    unverifiable << "digest_to '#{outputs['digest_to']}' (channel privacy not statically decidable)" unless blank?(outputs['digest_to'])
-    unverifiable << "alarms_to '#{outputs['alarms_to']}' (channel privacy not statically decidable)" unless blank?(outputs['alarms_to'])
+    unverifiable << "digest_to '#{outputs['digest_to']}' (#{undecidable})" unless blank?(outputs['digest_to'])
+    unverifiable << "alarms_to '#{outputs['alarms_to']}' (#{undecidable})" unless blank?(outputs['alarms_to'])
     return [] if unverifiable.empty?
 
+    # The leading spaces below line the continuation up under Violation#to_line's
+    # own two-space "  x " prefix (see to_line above) so bin/config-lint's
+    # per-line output stays visually aligned. Re-indenting or wrapping this
+    # message breaks that alignment — Task 5 prints it verbatim.
     [Violation.new(severity: :warning, rule: :destinations_unverifiable, key: 'scheduled_jobs.outputs',
                    message: "#{unverifiable.size} destination(s) could not be verified as private:\n" \
                             "#{unverifiable.map { |u| "      #{u}" }.join("\n")}\n" \

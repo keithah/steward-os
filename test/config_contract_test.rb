@@ -362,6 +362,13 @@ class SemanticTest < Minitest::Test
     assert_equal :error, rule(cfg, :index_not_public).severity
   end
 
+  def test_no_declared_repositories_is_unknown_visibility_fail_closed
+    cfg = base
+    cfg['repositories'] = []
+    cfg['scheduled_jobs']['outputs']['index_path'] = 'state/index.md'
+    assert_equal :error, rule(cfg, :index_not_public).severity
+  end
+
   def test_repo_relative_index_in_a_private_repo_is_fine
     cfg = base
     cfg['scheduled_jobs']['outputs']['index_path'] = 'state/index.md'
@@ -407,6 +414,8 @@ class SemanticTest < Minitest::Test
     cfg = base
     cfg['community']['chat']['platform'] = ''
     assert_equal :error, rule(cfg, :chat_needs_platform).severity
+    assert_nil rule(cfg, :phases_skipped),
+              'phase 3 ran and found this fault — it must not also claim it never ran'
   end
 
   def test_public_filing_without_watchdog_is_an_error
@@ -442,5 +451,21 @@ class SemanticTest < Minitest::Test
     cfg['community']['chat']['monitor'] = false
     cfg['issue_capture']['capture_marker'] = ''
     assert_nil rule(cfg, :destinations_unverifiable)
+  end
+
+  # The whole design rests on phase 1/2 errors suppressing phase 3. Prove it
+  # directly: a config that would trip index_not_public AND carries a type
+  # error must report the type error and phases_skipped, never the semantic
+  # rule the type error masked.
+  def test_a_type_error_suppresses_a_semantic_rule_that_would_otherwise_fire
+    cfg = base
+    cfg['repositories'] = [{ 'visibility' => 'public' }]
+    cfg['scheduled_jobs']['outputs']['index_path'] = 'state/index.md'
+    cfg['secrets']['execute_contributor_code'] = 'yes'
+
+    rules = check(cfg).map(&:rule)
+    assert_includes rules, :type_boolean
+    assert_includes rules, :phases_skipped
+    refute_includes rules, :index_not_public
   end
 end
