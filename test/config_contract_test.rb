@@ -271,3 +271,176 @@ class TypeTest < Minitest::Test
     assert_equal [], ConfigContract.job_type_violations(cfg)
   end
 end
+
+# --- Phase 3: semantic invariants ---
+class SemanticTest < Minitest::Test
+  # A minimal, fully-enabled, correctly-configured config. Every semantic rule
+  # is satisfied here, so each test below breaks exactly one thing.
+  def base
+    {
+      'repositories' => [{ 'visibility' => 'private' }],
+      'community' => { 'chat' => { 'monitor' => true, 'platform' => 'discord',
+                                   'capture_reaction' => 'white_check_mark' } },
+      'issue_capture' => {
+        'enabled' => true, 'capture_marker' => 'steward-captured',
+        'queue_path' => '/srv/steward/queue.md', 'ledger_path' => '/srv/steward/ledger.md',
+        'checkpoint_path' => '/srv/steward/checkpoint.md',
+        'max_per_run' => 10, 'max_public_files_per_run' => 0
+      },
+      'security' => { 'security_contact' => 'github-advisory' },
+      'secrets' => { 'execute_contributor_code' => false, 'sandbox_available' => false },
+      'scheduled_jobs' => {
+        'jobs' => [{ 'name' => 'action-watchdog', 'every' => '6h', 'enabled' => true }],
+        'outputs' => { 'index_path' => '/srv/steward/index.md', 'digest_to' => '',
+                       'alarms_to' => 'ops@example.com' }
+      }
+    }
+  end
+
+  def check(config)
+    ConfigContract.check(config: config, template: base)
+  end
+
+  def rule(config, sym)
+    check(config).find { |x| x.rule == sym }
+  end
+
+  def errors(config)
+    check(config).select { |x| x.severity == :error }
+  end
+
+  def test_the_fully_enabled_base_has_no_errors
+    assert_empty errors(base).map(&:rule)
+  end
+
+  def test_enabled_capture_without_alarms_to_is_an_error
+    cfg = base
+    cfg['scheduled_jobs']['outputs']['alarms_to'] = ''
+    assert_equal :error, rule(cfg, :alarms_to_required).severity
+  end
+
+  def test_whitespace_only_alarms_to_counts_as_blank
+    cfg = base
+    cfg['scheduled_jobs']['outputs']['alarms_to'] = '   '
+    assert_equal :error, rule(cfg, :alarms_to_required).severity
+  end
+
+  def test_disabled_capture_needs_no_alarms_to
+    cfg = base
+    cfg['issue_capture']['enabled'] = false
+    cfg['community']['chat']['monitor'] = false
+    cfg['issue_capture']['capture_marker'] = ''
+    cfg['scheduled_jobs']['outputs']['alarms_to'] = ''
+    assert_nil rule(cfg, :alarms_to_required)
+  end
+
+  def test_enabled_capture_without_state_paths_is_an_error
+    cfg = base
+    cfg['issue_capture']['ledger_path'] = ''
+    v = rule(cfg, :capture_state_paths_required)
+    assert_equal :error, v.severity
+    assert_match(/ledger_path/, v.message)
+  end
+
+  def test_enabled_capture_without_pull_index_is_an_error
+    cfg = base
+    cfg['scheduled_jobs']['outputs']['index_path'] = ''
+    assert_equal :error, rule(cfg, :pull_index_required).severity
+  end
+
+  def test_repo_relative_index_in_a_public_repo_is_an_error
+    cfg = base
+    cfg['repositories'] = [{ 'visibility' => 'public' }]
+    cfg['scheduled_jobs']['outputs']['index_path'] = 'state/index.md'
+    assert_equal :error, rule(cfg, :index_not_public).severity
+  end
+
+  def test_mixed_visibility_still_errors_fail_closed
+    cfg = base
+    cfg['repositories'] = [{ 'visibility' => 'private' }, { 'visibility' => 'public' }]
+    cfg['scheduled_jobs']['outputs']['index_path'] = 'state/index.md'
+    assert_equal :error, rule(cfg, :index_not_public).severity
+  end
+
+  def test_repo_relative_index_in_a_private_repo_is_fine
+    cfg = base
+    cfg['scheduled_jobs']['outputs']['index_path'] = 'state/index.md'
+    assert_nil rule(cfg, :index_not_public)
+  end
+
+  def test_public_repo_index_with_capture_disabled_is_fine
+    cfg = base
+    cfg['repositories'] = [{ 'visibility' => 'public' }]
+    cfg['issue_capture']['enabled'] = false
+    cfg['community']['chat']['monitor'] = false
+    cfg['issue_capture']['capture_marker'] = ''
+    cfg['scheduled_jobs']['outputs']['index_path'] = 'state/index.md'
+    assert_nil rule(cfg, :index_not_public)
+  end
+
+  def test_marker_without_enabled_watchdog_is_an_error
+    cfg = base
+    cfg['scheduled_jobs']['jobs'][0]['enabled'] = false
+    assert_equal :error, rule(cfg, :marker_needs_watchdog).severity
+  end
+
+  def test_marker_with_no_watchdog_job_at_all_is_an_error
+    cfg = base
+    cfg['scheduled_jobs']['jobs'] = [{ 'name' => 'label-sync', 'every' => '4h', 'enabled' => true }]
+    assert_equal :error, rule(cfg, :marker_needs_watchdog).severity
+  end
+
+  def test_reaction_with_monitor_and_no_watchdog_is_an_error
+    cfg = base
+    cfg['issue_capture']['capture_marker'] = ''
+    cfg['scheduled_jobs']['jobs'][0]['enabled'] = false
+    assert_equal :error, rule(cfg, :reaction_needs_watchdog).severity
+  end
+
+  def test_monitor_without_capture_core_is_an_error
+    cfg = base
+    cfg['issue_capture']['enabled'] = false
+    assert_equal :error, rule(cfg, :chat_needs_capture_core).severity
+  end
+
+  def test_monitor_without_platform_is_an_error
+    cfg = base
+    cfg['community']['chat']['platform'] = ''
+    assert_equal :error, rule(cfg, :chat_needs_platform).severity
+  end
+
+  def test_public_filing_without_watchdog_is_an_error
+    cfg = base
+    cfg['issue_capture']['capture_marker'] = ''
+    cfg['community']['chat']['capture_reaction'] = ''
+    cfg['issue_capture']['max_public_files_per_run'] = 3
+    cfg['scheduled_jobs']['jobs'][0]['enabled'] = false
+    assert_equal :error, rule(cfg, :public_files_need_watchdog).severity
+  end
+
+  def test_contributor_code_without_sandbox_is_an_error
+    cfg = base
+    cfg['secrets']['execute_contributor_code'] = true
+    assert_equal :error, rule(cfg, :sandbox_required).severity
+  end
+
+  def test_undecidable_destinations_warn_once_and_do_not_error
+    cfg = base
+    cfg['scheduled_jobs']['outputs']['digest_to'] = '#steward-digest'
+    v = check(cfg)
+    warnings = v.select { |x| x.rule == :destinations_unverifiable }
+    assert_equal 1, warnings.size
+    assert_equal :warning, warnings.first.severity
+    assert_match(/index_path/, warnings.first.message)
+    assert_match(/digest_to/, warnings.first.message)
+    assert_empty v.select { |x| x.severity == :error }
+  end
+
+  def test_no_unverifiable_warning_when_capture_is_disabled
+    cfg = base
+    cfg['issue_capture']['enabled'] = false
+    cfg['community']['chat']['monitor'] = false
+    cfg['issue_capture']['capture_marker'] = ''
+    assert_nil rule(cfg, :destinations_unverifiable)
+  end
+end

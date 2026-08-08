@@ -49,6 +49,23 @@ module ConfigContract
 
   VISIBILITIES = %w[public private].freeze
 
+  # Every semantic rule this phase can emit. Task 6's meta-test asserts each has
+  # a red fixture — keep in sync when adding a rule.
+  SEMANTIC_RULES = %i[
+    alarms_to_required
+    capture_state_paths_required
+    pull_index_required
+    index_not_public
+    marker_needs_watchdog
+    reaction_needs_watchdog
+    chat_needs_capture_core
+    chat_needs_platform
+    public_files_need_watchdog
+    sandbox_required
+  ].freeze
+
+  CAPTURE_STATE_PATHS = %w[queue_path ledger_path checkpoint_path].freeze
+
   # Pure. Given the parsed config and the parsed template, return violations.
   #
   # Three ordered phases. Phase 3's reads all assume a key exists at the right
@@ -67,6 +84,10 @@ module ConfigContract
 
     unless violations.any? { |v| v.severity == :error }
       violations.concat(type_violations(config))
+    end
+
+    unless violations.any? { |v| v.severity == :error }
+      violations.concat(semantic_violations(config))
     end
 
     violations << phases_skipped if violations.any? { |v| v.severity == :error }
@@ -218,6 +239,134 @@ module ConfigContract
       end
       violations
     end
+  end
+
+  def self.blank?(value)
+    value.nil? || (value.is_a?(String) && value.strip.empty?)
+  end
+
+  # No URI scheme, not absolute, not home-relative. Anything else is outside the
+  # repo and routes to the unverifiable warning instead of index_not_public.
+  # A Windows-style C:\ path counts as outside — not a supported form, but
+  # calling it repo-relative would produce a false error.
+  def self.repo_relative?(path)
+    return false if blank?(path)
+    return false if path.include?('://') || path.start_with?('/', '~')
+    return false if path.match?(/\A[A-Za-z]:[\\\/]/)
+
+    true
+  end
+
+  def self.watchdog_enabled?(config)
+    jobs = config.dig('scheduled_jobs', 'jobs')
+    return false unless jobs.is_a?(Array)
+
+    jobs.any? { |j| j.is_a?(Hash) && j['name'] == 'action-watchdog' && j['enabled'] == true }
+  end
+
+  def self.semantic_violations(config)
+    capture = config.dig('issue_capture', 'enabled') == true
+    monitor = config.dig('community', 'chat', 'monitor') == true
+    marker  = config.dig('issue_capture', 'capture_marker')
+    reaction = config.dig('community', 'chat', 'capture_reaction')
+    outputs = config.dig('scheduled_jobs', 'outputs') || {}
+    index   = outputs['index_path']
+    watchdog = watchdog_enabled?(config)
+
+    violations = []
+
+    if capture
+      if blank?(outputs['alarms_to'])
+        violations << err(:alarms_to_required, 'scheduled_jobs.outputs.alarms_to',
+                          'required when issue_capture.enabled — the divert needs an independent ' \
+                          'human route even when security_contact is set (config.template.yaml:130)')
+      end
+
+      missing = CAPTURE_STATE_PATHS.select { |k| blank?(config.dig('issue_capture', k)) }
+      unless missing.empty?
+        violations << err(:capture_state_paths_required, 'issue_capture',
+                          "issue_capture.enabled requires private #{missing.join(', ')} " \
+                          '(issue-capture/SKILL.md:19-21)')
+      end
+
+      if blank?(index)
+        violations << err(:pull_index_required, 'scheduled_jobs.outputs.index_path',
+                          'issue_capture.enabled requires a pull index (issue-capture/SKILL.md:26-27)')
+      elsif repo_relative?(index) && public_repo?(config)
+        violations << err(:index_not_public, 'scheduled_jobs.outputs.index_path',
+                          "'#{index}' is repo-relative and this project lists a public repository. " \
+                          'An index that can hold a diverted vulnerability must not be a public ' \
+                          'surface (config.template.yaml:124-126). If it lives in a private repo, ' \
+                          'use an absolute path to say so')
+      end
+    end
+
+    unless blank?(marker) || watchdog
+      violations << err(:marker_needs_watchdog, 'issue_capture.capture_marker',
+                        'a public capture marker requires an enabled action-watchdog job ' \
+                        '(config.template.yaml:51)')
+    end
+
+    if monitor && !blank?(reaction) && !watchdog
+      violations << err(:reaction_needs_watchdog, 'community.chat.capture_reaction',
+                        'a public capture reaction requires an enabled action-watchdog job ' \
+                        '(issue-capture/SKILL.md:23-25)')
+    end
+
+    if monitor && !capture
+      violations << err(:chat_needs_capture_core, 'community.chat.monitor',
+                        'chat monitoring requires issue_capture.enabled — chat must not implement ' \
+                        'a second capture path (config.template.yaml:44)')
+    end
+
+    if monitor && blank?(config.dig('community', 'chat', 'platform'))
+      violations << err(:chat_needs_platform, 'community.chat.platform',
+                        'a blank platform means chat monitoring is disabled, but monitor is true')
+    end
+
+    files = config.dig('issue_capture', 'max_public_files_per_run')
+    if files.is_a?(Integer) && files.positive? && !watchdog
+      violations << err(:public_files_need_watchdog, 'issue_capture.max_public_files_per_run',
+                        'autonomous public filing requires an enabled action-watchdog ' \
+                        '(INFERRED from security-spine.md #6 self-test, not a literal config line)')
+    end
+
+    if config.dig('secrets', 'execute_contributor_code') == true &&
+       config.dig('secrets', 'sandbox_available') != true
+      violations << err(:sandbox_required, 'secrets.execute_contributor_code',
+                        'running contributor code requires sandbox_available: true ' \
+                        '(config.template.yaml:106)')
+    end
+
+    violations + unverifiable_warning(config, capture, outputs, index)
+  end
+
+  def self.err(rule, key, message)
+    Violation.new(severity: :error, rule: rule, key: key, message: message)
+  end
+
+  def self.public_repo?(config)
+    repos = config['repositories']
+    return false unless repos.is_a?(Array)
+
+    repos.any? { |r| r.is_a?(Hash) && r['visibility'] == 'public' }
+  end
+
+  # One grouped warning, not one per destination: three separate warnings would
+  # fire on every correctly-configured adopter and train them to ignore output.
+  def self.unverifiable_warning(_config, capture, outputs, index)
+    return [] unless capture
+
+    unverifiable = []
+    unverifiable << "index_path '#{index}' (outside the repo)" if !blank?(index) && !repo_relative?(index)
+    unverifiable << "digest_to '#{outputs['digest_to']}' (channel privacy not statically decidable)" unless blank?(outputs['digest_to'])
+    unverifiable << "alarms_to '#{outputs['alarms_to']}' (channel privacy not statically decidable)" unless blank?(outputs['alarms_to'])
+    return [] if unverifiable.empty?
+
+    [Violation.new(severity: :warning, rule: :destinations_unverifiable, key: 'scheduled_jobs.outputs',
+                   message: "#{unverifiable.size} destination(s) could not be verified as private:\n" \
+                            "#{unverifiable.map { |u| "      #{u}" }.join("\n")}\n" \
+                            '    Confirm each before enabling autonomous capture.')]
   end
 
   # Repo readers. Each is small and testable against real files.
