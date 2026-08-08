@@ -75,8 +75,7 @@ module ConfigContract
     unless config.is_a?(Hash) && !config.empty?
       # Nothing downstream can run, so say so — every suppressing error
       # announces the suppression, this one included.
-      return [Violation.new(severity: :error, rule: :not_a_mapping, key: '(document)',
-                            message: 'config is empty or its top level is not a mapping'),
+      return [err(:not_a_mapping, '(document)', 'config is empty or its top level is not a mapping'),
               phases_skipped]
     end
 
@@ -124,13 +123,15 @@ module ConfigContract
 
     (cfg_leaves - tpl_leaves).sort.each do |path|
       next if SCHEDULE_KEYS.include?(path)
+      # `path` plays the leaves role here, `t` the path role: this asks whether
+      # `path` sits at or below some template leaf, the mirror image of
+      # covered?'s documented "template-empty/config-populated" direction above.
       next if tpl_leaves.any? { |t| covered?(t, [path]) }
       # unknown-key loop — an empty collection here stands in for whatever the
       # template puts under it; the collection root is not an unknown key.
       next if cfg_empty.include?(path) && tpl_leaves.any? { |t| strict_descendant_of?(t, path) }
 
-      violations << Violation.new(severity: :error, rule: :unknown_key, key: path,
-                                  message: 'not a key in setup/config.template.yaml — check the spelling')
+      violations << err(:unknown_key, path, 'not a key in setup/config.template.yaml — check the spelling')
     end
 
     (tpl_leaves - cfg_leaves).sort.each do |path|
@@ -142,8 +143,7 @@ module ConfigContract
       # the whole subtree.
       next if cfg_empty.any? { |c| strict_descendant_of?(path, c) }
 
-      violations << Violation.new(severity: :error, rule: :missing_key, key: path,
-                                  message: 'required by setup/config.template.yaml but absent here')
+      violations << err(:missing_key, path, 'required by setup/config.template.yaml but absent here')
     end
 
     violations + job_schedule_violations(config)
@@ -155,9 +155,17 @@ module ConfigContract
       next [] if set == 1
 
       name = job['name'].is_a?(String) ? job['name'] : "index #{i}"
-      [Violation.new(severity: :error, rule: :job_schedule_alternation,
-                     key: "scheduled_jobs.jobs[#{i}]",
-                     message: "job '#{name}' must set exactly one of every: or cron: (found #{set})")]
+      [err(:job_schedule_alternation, "scheduled_jobs.jobs[#{i}]",
+           "job '#{name}' must set exactly one of every: or cron: (found #{set})")]
+    end
+  end
+
+  # Dotted-path read for non-list paths. List members are walked explicitly.
+  def self.fetch_path(hash, dotted)
+    dotted.split('.').reduce(hash) do |node, key|
+      return nil unless node.is_a?(Hash)
+
+      node[key]
     end
   end
 
@@ -176,15 +184,6 @@ module ConfigContract
 
     node.each_with_index.flat_map do |item, index|
       item.is_a?(Hash) ? yield(item, index) : []
-    end
-  end
-
-  # Dotted-path read for non-list paths. List members are walked explicitly.
-  def self.fetch_path(hash, dotted)
-    dotted.split('.').reduce(hash) do |node, key|
-      return nil unless node.is_a?(Hash)
-
-      node[key]
     end
   end
 
@@ -218,6 +217,10 @@ module ConfigContract
   def self.type_error(rule, key, value, expected)
     Violation.new(severity: :error, rule: rule, key: key,
                   message: "expected #{expected}, got #{value.class} (#{value.inspect})")
+  end
+
+  def self.err(rule, key, message)
+    Violation.new(severity: :error, rule: rule, key: key, message: message)
   end
 
   def self.repository_violations(config)
@@ -351,10 +354,6 @@ module ConfigContract
     end
 
     violations + unverifiable_warning(capture, outputs, index)
-  end
-
-  def self.err(rule, key, message)
-    Violation.new(severity: :error, rule: rule, key: key, message: message)
   end
 
   # Fail closed on "no declared repositories". An adopter who declares none
