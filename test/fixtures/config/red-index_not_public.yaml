@@ -1,5 +1,8 @@
-# Fixture: fully enabled, correctly configured. The ONLY artifact in the repo
-# that reaches the true branch of the semantic rules. Must stay green.
+# Red fixture for index_not_public.
+# NOTE: two edits, both required to isolate the rule: repositories[0].visibility
+# set to "public", and scheduled_jobs.outputs.index_path changed from an
+# absolute path to a repo-relative one. The rule needs repo_relative?(index)
+# and public_repo?(config) simultaneously true; either edit alone is inert.
 project:
   name: "fixture project"
   trunk_branch: "main"

@@ -1,5 +1,5 @@
-# Fixture: fully enabled, correctly configured. The ONLY artifact in the repo
-# that reaches the true branch of the semantic rules. Must stay green.
+# Red fixture for alarms_to_required.
+# One edit vs green-enabled.yaml: scheduled_jobs.outputs.alarms_to blanked.
 project:
   name: "fixture project"
   trunk_branch: "main"

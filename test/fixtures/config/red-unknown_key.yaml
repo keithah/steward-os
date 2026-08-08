@@ -1,5 +1,6 @@
-# Fixture: fully enabled, correctly configured. The ONLY artifact in the repo
-# that reaches the true branch of the semantic rules. Must stay green.
+# Red fixture for unknown_key.
+# One edit vs green-enabled.yaml: a top-level bogus_section added that is not
+# a key in setup/config.template.yaml.
 bogus_section:
   x: 1
 

@@ -1,5 +1,5 @@
-# Fixture: fully enabled, correctly configured. The ONLY artifact in the repo
-# that reaches the true branch of the semantic rules. Must stay green.
+# Red fixture for capture_state_paths_required.
+# One edit vs green-enabled.yaml: issue_capture.ledger_path blanked.
 project:
   name: "fixture project"
   trunk_branch: "main"

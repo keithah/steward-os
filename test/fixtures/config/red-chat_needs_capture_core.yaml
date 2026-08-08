@@ -1,5 +1,5 @@
-# Fixture: fully enabled, correctly configured. The ONLY artifact in the repo
-# that reaches the true branch of the semantic rules. Must stay green.
+# Red fixture for chat_needs_capture_core.
+# One edit vs green-enabled.yaml: issue_capture.enabled set to false.
 project:
   name: "fixture project"
   trunk_branch: "main"

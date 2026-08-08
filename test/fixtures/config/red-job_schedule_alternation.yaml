@@ -1,5 +1,6 @@
-# Fixture: fully enabled, correctly configured. The ONLY artifact in the repo
-# that reaches the true branch of the semantic rules. Must stay green.
+# Red fixture for job_schedule_alternation.
+# One edit vs green-enabled.yaml: the issue-capture job's `every: "1h"` removed
+# (no `cron:` added either), so it sets neither of the required alternation keys.
 project:
   name: "fixture project"
   trunk_branch: "main"

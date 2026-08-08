@@ -1,5 +1,7 @@
-# Fixture: fully enabled, correctly configured. The ONLY artifact in the repo
-# that reaches the true branch of the semantic rules. Must stay green.
+# Red fixture for marker_needs_watchdog.
+# One edit vs green-enabled.yaml: the action-watchdog job's `enabled` set to
+# false. (This also happens to trip reaction_needs_watchdog as a side effect,
+# since capture_reaction is still non-blank here — expected, see the plan.)
 project:
   name: "fixture project"
   trunk_branch: "main"

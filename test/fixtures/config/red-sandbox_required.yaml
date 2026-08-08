@@ -1,5 +1,5 @@
-# Fixture: fully enabled, correctly configured. The ONLY artifact in the repo
-# that reaches the true branch of the semantic rules. Must stay green.
+# Red fixture for sandbox_required.
+# One edit vs green-enabled.yaml: secrets.execute_contributor_code set to true.
 project:
   name: "fixture project"
   trunk_branch: "main"

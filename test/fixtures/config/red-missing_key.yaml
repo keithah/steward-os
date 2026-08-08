@@ -1,5 +1,6 @@
-# Fixture: fully enabled, correctly configured. The ONLY artifact in the repo
-# that reaches the true branch of the semantic rules. Must stay green.
+# Red fixture for missing_key.
+# One edit vs green-enabled.yaml: the entire top-level trust: block deleted
+# (a deletion, not a value change — nothing else in this file marks that).
 project:
   name: "fixture project"
   trunk_branch: "main"

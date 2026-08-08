@@ -469,6 +469,38 @@ class SemanticTest < Minitest::Test
     assert_includes rules, :phases_skipped
     refute_includes rules, :index_not_public
   end
+
+  # --- Safe escape hatches ---
+  #
+  # Three rules fire on `precondition && !remedy`. The reds prove they fire when
+  # the remedy is absent; the green never reaches the precondition at all. So
+  # nothing otherwise pins the corner where the precondition IS met and the
+  # adopter HAS applied the remedy the message tells them to apply. Drop either
+  # conjunct and the whole suite still passes — verified by mutation.
+  #
+  # This is the fail-closed direction, so it leaks nothing. It blocks every
+  # correctly-configured adopter instead, which is the failure this corpus is
+  # supposed to make impossible to ship unnoticed.
+
+  def test_public_filing_with_an_enabled_watchdog_is_fine
+    cfg = base
+    cfg['issue_capture']['max_public_files_per_run'] = 3
+    assert_nil rule(cfg, :public_files_need_watchdog)
+  end
+
+  def test_contributor_code_with_a_sandbox_is_fine
+    cfg = base
+    cfg['secrets']['execute_contributor_code'] = true
+    cfg['secrets']['sandbox_available'] = true
+    assert_nil rule(cfg, :sandbox_required)
+  end
+
+  def test_absolute_index_path_in_a_public_repo_is_fine
+    cfg = base
+    cfg['repositories'][0]['visibility'] = 'public'
+    cfg['scheduled_jobs']['outputs']['index_path'] = '/var/steward/index.md'
+    assert_nil rule(cfg, :index_not_public)
+  end
 end
 
 # --- Entrypoint: the real bin, not just the helpers ---
@@ -519,7 +551,8 @@ class CorpusTest < Minitest::Test
   end
 
   def test_the_corpus_is_not_empty
-    assert_operator self.class.red_fixtures.size, :>=, 14,
+    floor = ConfigContract::SEMANTIC_RULES.size + 4
+    assert_operator self.class.red_fixtures.size, :>=, floor,
                     'red fixtures went missing — the corpus proves nothing if it does not load'
   end
 
@@ -533,8 +566,9 @@ class CorpusTest < Minitest::Test
     expected = name.sub(/\Ared-/, '').to_sym
 
     define_method("test_#{name}_provokes_#{expected}") do
-      assert_includes rules_for(path), expected,
-                      "#{name} did not provoke #{expected} — got #{rules_for(path).inspect}"
+      actual = rules_for(path)
+      assert_includes actual, expected,
+                      "#{name} did not provoke #{expected} — got #{actual.inspect}"
     end
 
     define_method("test_#{name}_exits_nonzero") do
