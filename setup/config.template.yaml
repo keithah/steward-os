@@ -34,7 +34,7 @@ community:                      # optional — leave platform blank to disable c
     platform: ""                # discord | slack | ... | "" to disable
     server_id: ""
     bug_channels: []            # channel ids/names that carry bug reports
-    monitor: true               # read + normalize; shared issue_capture owns capture + reaction
+    monitor: false              # off until issue_capture.enabled and platform are set; shared issue_capture owns capture + reaction
     capture_reaction: "white_check_mark"   # chat-source marker; NEVER free-text public voice
   mentions_sweep:
     enabled: false
