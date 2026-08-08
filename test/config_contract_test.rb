@@ -183,3 +183,81 @@ class ShapeTest < Minitest::Test
     assert_includes rules(v), :phases_skipped
   end
 end
+
+# --- Phase 2: types ---
+class TypeTest < Minitest::Test
+  def base
+    {
+      'repositories' => [{ 'visibility' => 'public' }],
+      'community' => { 'chat' => { 'monitor' => false, 'platform' => '', 'capture_reaction' => '' } },
+      'issue_capture' => {
+        'enabled' => false, 'capture_marker' => '', 'queue_path' => '',
+        'ledger_path' => '', 'checkpoint_path' => '',
+        'max_per_run' => 10, 'max_public_files_per_run' => 0
+      },
+      'security' => { 'security_contact' => '' },
+      'secrets' => { 'execute_contributor_code' => false, 'sandbox_available' => false },
+      'scheduled_jobs' => {
+        'jobs' => [{ 'name' => 'action-watchdog', 'every' => '6h', 'enabled' => false }],
+        'outputs' => { 'index_path' => '', 'digest_to' => '', 'alarms_to' => '' }
+      }
+    }
+  end
+
+  def check(config)
+    ConfigContract.check(config: config, template: base)
+  end
+
+  def find(config, rule)
+    check(config).find { |x| x.rule == rule }
+  end
+
+  def test_string_false_is_not_a_boolean
+    cfg = base
+    cfg['issue_capture']['enabled'] = 'false'
+    v = find(cfg, :type_boolean)
+    assert_equal :error, v.severity
+    assert_equal 'issue_capture.enabled', v.key
+    assert_match(/String/, v.message)
+  end
+
+  def test_real_boolean_passes
+    assert_nil find(base, :type_boolean)
+  end
+
+  def test_integer_where_a_string_belongs_is_an_error
+    cfg = base
+    cfg['scheduled_jobs']['outputs']['alarms_to'] = 42
+    assert_equal 'scheduled_jobs.outputs.alarms_to', find(cfg, :type_string).key
+  end
+
+  def test_blank_string_is_a_valid_string
+    assert_nil find(base, :type_string)
+  end
+
+  def test_negative_bound_is_an_error
+    cfg = base
+    cfg['issue_capture']['max_per_run'] = -1
+    assert_equal 'issue_capture.max_per_run', find(cfg, :type_non_negative_integer).key
+  end
+
+  def test_misspelled_visibility_is_an_error
+    cfg = base
+    cfg['repositories'][0]['visibility'] = 'publik'
+    v = find(cfg, :type_enum)
+    assert_equal 'repositories[0].visibility', v.key
+    assert_match(/public/, v.message)
+  end
+
+  def test_non_boolean_job_enabled_is_an_error
+    cfg = base
+    cfg['scheduled_jobs']['jobs'][0]['enabled'] = 'yes'
+    assert_equal 'scheduled_jobs.jobs[0].enabled', find(cfg, :type_boolean).key
+  end
+
+  def test_type_error_suppresses_later_phases
+    cfg = base
+    cfg['issue_capture']['enabled'] = 'false'
+    assert_includes check(cfg).map(&:rule), :phases_skipped
+  end
+end

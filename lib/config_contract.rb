@@ -22,6 +22,33 @@ module ConfigContract
   # diff so job_schedule_alternation can check them per-job instead.
   SCHEDULE_KEYS = %w[scheduled_jobs.jobs[].every scheduled_jobs.jobs[].cron].freeze
 
+  BOOLEAN_KEYS = %w[
+    issue_capture.enabled
+    community.chat.monitor
+    secrets.execute_contributor_code
+    secrets.sandbox_available
+  ].freeze
+
+  STRING_KEYS = %w[
+    issue_capture.capture_marker
+    issue_capture.queue_path
+    issue_capture.ledger_path
+    issue_capture.checkpoint_path
+    community.chat.platform
+    community.chat.capture_reaction
+    security.security_contact
+    scheduled_jobs.outputs.index_path
+    scheduled_jobs.outputs.digest_to
+    scheduled_jobs.outputs.alarms_to
+  ].freeze
+
+  NON_NEGATIVE_INT_KEYS = %w[
+    issue_capture.max_per_run
+    issue_capture.max_public_files_per_run
+  ].freeze
+
+  VISIBILITIES = %w[public private].freeze
+
   # Pure. Given the parsed config and the parsed template, return violations.
   #
   # Three ordered phases. Phase 3's reads all assume a key exists at the right
@@ -39,7 +66,7 @@ module ConfigContract
     violations = shape_violations(config, template)
 
     unless violations.any? { |v| v.severity == :error }
-      # Type and semantic phases land here in Tasks 3 and 4.
+      violations.concat(type_violations(config))
     end
 
     violations << phases_skipped if violations.any? { |v| v.severity == :error }
@@ -114,6 +141,81 @@ module ConfigContract
                     key: "scheduled_jobs.jobs[#{i}]",
                     message: "job '#{name}' must set exactly one of every: or cron: (found #{set})")
     end
+  end
+
+  # Dotted-path read for non-list paths. List members are walked explicitly.
+  def self.fetch_path(hash, dotted)
+    dotted.split('.').reduce(hash) do |node, key|
+      return nil unless node.is_a?(Hash)
+
+      node[key]
+    end
+  end
+
+  def self.type_violations(config)
+    violations = []
+
+    BOOLEAN_KEYS.each do |path|
+      value = fetch_path(config, path)
+      next if [true, false].include?(value)
+
+      violations << type_error(:type_boolean, path, value, 'true or false')
+    end
+
+    STRING_KEYS.each do |path|
+      value = fetch_path(config, path)
+      next if value.is_a?(String)
+
+      violations << type_error(:type_string, path, value, 'a string (blank disables)')
+    end
+
+    NON_NEGATIVE_INT_KEYS.each do |path|
+      value = fetch_path(config, path)
+      next if value.is_a?(Integer) && !value.negative?
+
+      violations << type_error(:type_non_negative_integer, path, value, 'an integer >= 0')
+    end
+
+    violations + repository_violations(config) + job_type_violations(config)
+  end
+
+  def self.type_error(rule, key, value, expected)
+    Violation.new(severity: :error, rule: rule, key: key,
+                  message: "expected #{expected}, got #{value.class} (#{value.inspect})")
+  end
+
+  def self.repository_violations(config)
+    repos = config['repositories']
+    return [] unless repos.is_a?(Array)
+
+    repos.each_with_index.filter_map do |repo, i|
+      next unless repo.is_a?(Hash)
+
+      value = repo['visibility']
+      next if VISIBILITIES.include?(value)
+
+      Violation.new(severity: :error, rule: :type_enum, key: "repositories[#{i}].visibility",
+                    message: "expected one of #{VISIBILITIES.join(', ')}, got #{value.inspect}")
+    end
+  end
+
+  def self.job_type_violations(config)
+    jobs = config.dig('scheduled_jobs', 'jobs')
+    return [] unless jobs.is_a?(Array)
+
+    violations = []
+    jobs.each_with_index do |job, i|
+      next unless job.is_a?(Hash)
+
+      unless job['name'].is_a?(String)
+        violations << type_error(:type_string, "scheduled_jobs.jobs[#{i}].name", job['name'], 'a string')
+      end
+      unless [true, false].include?(job['enabled'])
+        violations << type_error(:type_boolean, "scheduled_jobs.jobs[#{i}].enabled", job['enabled'],
+                                 'true or false')
+      end
+    end
+    violations
   end
 
   # Repo readers. Each is small and testable against real files.
