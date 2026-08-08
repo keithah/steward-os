@@ -2,6 +2,7 @@
 
 require 'minitest/autorun'
 require 'tmpdir'
+require 'English'
 require_relative '../lib/config_contract'
 
 FIXTURE_ROOT = File.expand_path('fixtures/config', __dir__)
@@ -467,5 +468,36 @@ class SemanticTest < Minitest::Test
     assert_includes rules, :type_boolean
     assert_includes rules, :phases_skipped
     refute_includes rules, :index_not_public
+  end
+end
+
+# --- Entrypoint: the real bin, not just the helpers ---
+class EntrypointTest < Minitest::Test
+  BIN = File.expand_path('../bin/config-lint', __dir__)
+
+  def run_lint(*args)
+    out = IO.popen([BIN, *args], err: [:child, :out], &:read)
+    [out, $CHILD_STATUS.exitstatus]
+  end
+
+  def test_no_args_checks_both_in_repo_configs_and_passes
+    out, status = run_lint
+    assert_equal 0, status, out
+    assert_match(/config\.template\.yaml/, out)
+    assert_match(/setup\/config\.yaml/, out)
+    assert_match(/OK/, out)
+  end
+
+  def test_help_states_the_boundary
+    out, status = run_lint('--help')
+    assert_equal 0, status
+    assert_match(/statically decidable subset/, out)
+    assert_match(/does not replace/, out)
+  end
+
+  def test_unreadable_path_exits_1_rather_than_crashing
+    out, status = run_lint('no/such/config.yaml')
+    assert_equal 1, status
+    assert_match(/could not read/, out)
   end
 end
