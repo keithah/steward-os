@@ -25,6 +25,9 @@ by the watchdog.
    reads this ledger, alarm and fail before scanning. To continue private capture without a public
    marker, explicitly set that source's marker configuration to blank before the run. A missing state
    path, pull index, or alarm route also fails before scanning. No invalid setup marks an item captured.
+   `bin/config-lint` checks the statically decidable subset of this preflight deterministically; run
+   it first, but it does not replace this step, which still owns writability, reachability, and the
+   privacy of any destination outside the repo.
 2. **Normalize, key, and lock each run.** Every adapter supplies its name, a stable source item id,
    the target repository, the untrusted body, and its source-specific marker. Build the capture key
    from **adapter + stable source item id + target repository**. Take one exclusive lock for the
