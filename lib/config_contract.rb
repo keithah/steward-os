@@ -28,8 +28,13 @@ module ConfigContract
   # path with the right type, so a shape or type error suppresses it — that
   # ordering is the fail-closed mechanism, not an optimization.
   def self.check(config:, template:)
-    return [Violation.new(severity: :error, rule: :not_a_mapping, key: '(document)',
-                          message: 'config is empty or its top level is not a mapping')] unless config.is_a?(Hash) && !config.empty?
+    unless config.is_a?(Hash) && !config.empty?
+      # Nothing downstream can run, so say so — every suppressing error
+      # announces the suppression, this one included.
+      return [Violation.new(severity: :error, rule: :not_a_mapping, key: '(document)',
+                            message: 'config is empty or its top level is not a mapping'),
+              phases_skipped]
+    end
 
     violations = shape_violations(config, template)
 
@@ -37,30 +42,41 @@ module ConfigContract
       # Type and semantic phases land here in Tasks 3 and 4.
     end
 
-    if violations.any? { |v| v.severity == :error }
-      violations << Violation.new(severity: :info, rule: :phases_skipped, key: '(document)',
-                                  message: 'semantic invariants NOT evaluated — fix the errors above and re-run')
-    end
+    violations << phases_skipped if violations.any? { |v| v.severity == :error }
 
     violations
   end
 
-  # A template path is satisfied by a config path that equals it, or that
-  # descends from it. Lets `sources: []` in one file accept `sources: [...]` in
-  # the other, in both directions.
+  def self.phases_skipped
+    Violation.new(severity: :info, rule: :phases_skipped, key: '(document)',
+                  message: 'semantic invariants NOT evaluated — fix the errors above and re-run')
+  end
+
+  # `leaf` sits strictly beneath `ancestor` in the path namespace.
+  def self.strict_descendant_of?(leaf, ancestor)
+    leaf.start_with?("#{ancestor}.") || leaf.start_with?("#{ancestor}[")
+  end
+
+  # A path is satisfied by a leaf that equals it or descends from it. This is
+  # the template-empty/config-populated direction: `sources: []` in the
+  # template accepts `sources: [...]` in the config. The opposite direction is
+  # handled in shape_violations, gated on genuine emptiness.
   def self.covered?(path, leaves)
-    leaves.include?(path) ||
-      leaves.any? { |l| l.start_with?("#{path}.") || l.start_with?("#{path}[") }
+    leaves.include?(path) || leaves.any? { |l| strict_descendant_of?(l, path) }
   end
 
   def self.shape_violations(config, template)
     cfg_leaves = Extract.key_paths(config).uniq
     tpl_leaves = Extract.key_paths(template).uniq
+    cfg_empty = Extract.empty_collection_paths(config).uniq
     violations = []
 
     (cfg_leaves - tpl_leaves).sort.each do |path|
       next if SCHEDULE_KEYS.include?(path)
       next if tpl_leaves.any? { |t| covered?(t, [path]) }
+      # unknown-key loop — an empty collection here stands in for whatever the
+      # template puts under it; the collection root is not an unknown key.
+      next if cfg_empty.include?(path) && tpl_leaves.any? { |t| strict_descendant_of?(t, path) }
 
       violations << Violation.new(severity: :error, rule: :unknown_key, key: path,
                                   message: 'not a key in setup/config.template.yaml — check the spelling')
@@ -69,6 +85,11 @@ module ConfigContract
     (tpl_leaves - cfg_leaves).sort.each do |path|
       next if SCHEDULE_KEYS.include?(path)
       next if covered?(path, cfg_leaves)
+      # missing-key loop — ...and it accounts for the keys the template puts
+      # beneath it. Gated on a genuinely empty [] or {}: a nil or scalar
+      # ancestor keeps reporting, or this skip becomes a fail-open hole over
+      # the whole subtree.
+      next if cfg_empty.any? { |c| strict_descendant_of?(path, c) }
 
       violations << Violation.new(severity: :error, rule: :missing_key, key: path,
                                   message: 'required by setup/config.template.yaml but absent here')
@@ -78,7 +99,8 @@ module ConfigContract
   end
 
   def self.job_schedule_violations(config)
-    jobs = config.dig('scheduled_jobs', 'jobs')
+    scheduled = config['scheduled_jobs']
+    jobs = scheduled.is_a?(Hash) ? scheduled['jobs'] : nil
     return [] unless jobs.is_a?(Array)
 
     jobs.each_with_index.filter_map do |job, i|
@@ -114,24 +136,38 @@ module ConfigContract
       raise "could not parse #{path}: #{e.message}"
     end
 
-    # Every leaf key path, dotted, with list elements normalized to `[]` so a
-    # one-element template list and a five-element adopter list compare equal.
-    # An empty Hash or Array is itself a leaf; check#covered? then treats it as
-    # an opaque prefix so `sources: []` accepts `sources: ["email"]`.
-    def key_paths(node, prefix = '')
-      return [prefix] if !prefix.empty? && OPAQUE_SUBTREES.include?(prefix)
+    # Every leaf path paired with its node. key_paths and
+    # empty_collection_paths are both views of this one walk.
+    def leaves(node, prefix = '')
+      return [[prefix, node]] if !prefix.empty? && OPAQUE_SUBTREES.include?(prefix)
 
       case node
       when Hash
-        return [prefix] if node.empty?
+        return [[prefix, node]] if node.empty?
 
-        node.flat_map { |k, v| key_paths(v, prefix.empty? ? k.to_s : "#{prefix}.#{k}") }
+        node.flat_map { |k, v| leaves(v, prefix.empty? ? k.to_s : "#{prefix}.#{k}") }
       when Array
-        return [prefix] if node.empty?
+        return [[prefix, node]] if node.empty?
 
-        node.flat_map { |v| key_paths(v, "#{prefix}[]") }
+        node.flat_map { |v| leaves(v, "#{prefix}[]") }
       else
-        [prefix]
+        [[prefix, node]]
+      end
+    end
+
+    # Every leaf key path, dotted, with list elements normalized to `[]` so a
+    # one-element template list and a five-element adopter list compare equal.
+    # An empty Hash or Array is itself a leaf.
+    def key_paths(node, prefix = '')
+      leaves(node, prefix).map(&:first)
+    end
+
+    # The subset of leaf paths whose node is an empty [] or {}. An empty
+    # collection is a leaf that stands in for whatever the other file puts
+    # beneath it; nil and scalars deliberately do not qualify.
+    def empty_collection_paths(node, prefix = '')
+      leaves(node, prefix).filter_map do |path, value|
+        path if (value.is_a?(Hash) || value.is_a?(Array)) && value.empty?
       end
     end
   end

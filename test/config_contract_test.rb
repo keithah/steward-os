@@ -36,6 +36,17 @@ class ExtractKeyPathsTest < Minitest::Test
   end
 end
 
+class ExtractEmptyCollectionPathsTest < Minitest::Test
+  def empties(node)
+    ConfigContract::Extract.empty_collection_paths(node)
+  end
+
+  def test_finds_empty_hash_and_empty_array_leaves_only
+    node = { 'a' => [], 'b' => {}, 'c' => 1, 'd' => { 'e' => [] } }
+    assert_equal %w[a b d.e].sort, empties(node).sort
+  end
+end
+
 class ExtractLoadTest < Minitest::Test
   def test_load_returns_parsed_hash
     Dir.mktmpdir do |dir|
@@ -67,7 +78,7 @@ end
 # --- Phase 1: shape ---
 class ShapeTest < Minitest::Test
   TEMPLATE = {
-    'project' => { 'name' => '' },
+    'project' => { 'name' => '', 'repo' => '' },
     'issue_capture' => { 'enabled' => false, 'sources' => [] },
     'scheduled_jobs' => {
       'jobs' => [
@@ -132,9 +143,36 @@ class ShapeTest < Minitest::Test
     assert_empty check(cfg).select { |x| x.rule == :missing_key }
   end
 
+  def test_empty_config_list_satisfies_a_populated_template_list
+    cfg = Marshal.load(Marshal.dump(TEMPLATE))
+    cfg['scheduled_jobs']['jobs'] = []
+    assert_empty check(cfg).select { |x| %i[unknown_key missing_key].include?(x.rule) }
+  end
+
+  def test_empty_config_hash_satisfies_a_populated_template_subtree
+    cfg = Marshal.load(Marshal.dump(TEMPLATE))
+    cfg['scheduled_jobs'] = {}
+    assert_empty check(cfg).select { |x| %i[unknown_key missing_key].include?(x.rule) }
+  end
+
+  def test_nil_ancestor_does_not_suppress_missing_keys
+    cfg = Marshal.load(Marshal.dump(TEMPLATE))
+    cfg['scheduled_jobs'] = nil
+    assert_includes rules(check(cfg)), :missing_key,
+                    'a nil ancestor is not an empty collection — suppressing here would be fail-open'
+  end
+
+  def test_scalar_ancestor_does_not_suppress_missing_keys
+    cfg = Marshal.load(Marshal.dump(TEMPLATE))
+    cfg['scheduled_jobs'] = 'yes'
+    assert_includes rules(check(cfg)), :missing_key
+  end
+
   def test_non_mapping_document_is_an_error
-    v = ConfigContract.check(config: [], template: TEMPLATE).find { |x| x.rule == :not_a_mapping }
-    assert_equal :error, v.severity
+    v = ConfigContract.check(config: [], template: TEMPLATE)
+    assert_equal :error, v.find { |x| x.rule == :not_a_mapping }.severity
+    assert_includes v.map(&:rule), :phases_skipped,
+                    'a suppressing error must always announce the suppression'
   end
 
   def test_shape_error_suppresses_later_phases
