@@ -260,4 +260,14 @@ class TypeTest < Minitest::Test
     cfg['issue_capture']['enabled'] = 'false'
     assert_includes check(cfg).map(&:rule), :phases_skipped
   end
+
+  def test_non_hash_list_elements_are_skipped_not_crashed
+    cfg = base
+    cfg['repositories'] << 'not-a-hash'
+    cfg['scheduled_jobs']['jobs'] << 'also-not-a-hash'
+
+    assert_equal [], ConfigContract.repository_violations(cfg)
+    assert_equal [], ConfigContract.job_schedule_violations(cfg)
+    assert_equal [], ConfigContract.job_type_violations(cfg)
+  end
 end

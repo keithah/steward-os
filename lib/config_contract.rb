@@ -126,20 +126,32 @@ module ConfigContract
   end
 
   def self.job_schedule_violations(config)
-    scheduled = config['scheduled_jobs']
-    jobs = scheduled.is_a?(Hash) ? scheduled['jobs'] : nil
-    return [] unless jobs.is_a?(Array)
-
-    jobs.each_with_index.filter_map do |job, i|
-      next unless job.is_a?(Hash)
-
+    violations_for_each(config, 'scheduled_jobs', 'jobs') do |job, i|
       set = %w[every cron].count { |k| job.key?(k) }
-      next if set == 1
+      next [] if set == 1
 
       name = job['name'].is_a?(String) ? job['name'] : "index #{i}"
-      Violation.new(severity: :error, rule: :job_schedule_alternation,
-                    key: "scheduled_jobs.jobs[#{i}]",
-                    message: "job '#{name}' must set exactly one of every: or cron: (found #{set})")
+      [Violation.new(severity: :error, rule: :job_schedule_alternation,
+                     key: "scheduled_jobs.jobs[#{i}]",
+                     message: "job '#{name}' must set exactly one of every: or cron: (found #{set})")]
+    end
+  end
+
+  # Yield each Hash element of the array at `path`, with its index, and
+  # concatenate the violation arrays the block returns. The block always
+  # returns an Array — `[]` means "nothing wrong with this element".
+  #
+  # Three call sites walk a list of hashes this way (job schedules, job types,
+  # repository visibility). They share this instead of each rewriting the
+  # walk. Walks the path by hand rather than with `dig`: dig raises TypeError
+  # when an intermediate is a scalar, and a malformed `scheduled_jobs: yes`
+  # must be reported by the shape or type phase, not crash the lint.
+  def self.violations_for_each(config, *path)
+    node = path.reduce(config) { |acc, key| acc.is_a?(Hash) ? acc[key] : nil }
+    return [] unless node.is_a?(Array)
+
+    node.each_with_index.flat_map do |item, index|
+      item.is_a?(Hash) ? yield(item, index) : []
     end
   end
 
@@ -185,28 +197,18 @@ module ConfigContract
   end
 
   def self.repository_violations(config)
-    repos = config['repositories']
-    return [] unless repos.is_a?(Array)
-
-    repos.each_with_index.filter_map do |repo, i|
-      next unless repo.is_a?(Hash)
-
+    violations_for_each(config, 'repositories') do |repo, i|
       value = repo['visibility']
-      next if VISIBILITIES.include?(value)
+      next [] if VISIBILITIES.include?(value)
 
-      Violation.new(severity: :error, rule: :type_enum, key: "repositories[#{i}].visibility",
-                    message: "expected one of #{VISIBILITIES.join(', ')}, got #{value.inspect}")
+      [Violation.new(severity: :error, rule: :type_enum, key: "repositories[#{i}].visibility",
+                     message: "expected one of #{VISIBILITIES.join(', ')}, got #{value.inspect}")]
     end
   end
 
   def self.job_type_violations(config)
-    jobs = config.dig('scheduled_jobs', 'jobs')
-    return [] unless jobs.is_a?(Array)
-
-    violations = []
-    jobs.each_with_index do |job, i|
-      next unless job.is_a?(Hash)
-
+    violations_for_each(config, 'scheduled_jobs', 'jobs') do |job, i|
+      violations = []
       unless job['name'].is_a?(String)
         violations << type_error(:type_string, "scheduled_jobs.jobs[#{i}].name", job['name'], 'a string')
       end
@@ -214,8 +216,8 @@ module ConfigContract
         violations << type_error(:type_boolean, "scheduled_jobs.jobs[#{i}].enabled", job['enabled'],
                                  'true or false')
       end
+      violations
     end
-    violations
   end
 
   # Repo readers. Each is small and testable against real files.
