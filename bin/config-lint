@@ -27,6 +27,8 @@ if ARGV.include?('--help') || ARGV.include?('-h')
   puts BOUNDARY
   puts 'Not checked: keys inside labels.area.map, labels.type.map, and'
   puts 'labels.size.buckets are adopter-defined and are not validated.'
+  puts 'Type and value guards cover only the invariant-bearing keys; every other'
+  puts 'key is checked for presence and spelling only.'
   exit 0
 end
 

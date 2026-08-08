@@ -118,6 +118,15 @@ class ShapeTest < Minitest::Test
     assert_equal 'project.name', v.key
   end
 
+  def test_unknown_key_where_the_template_nests_a_mapping_says_so
+    cfg = Marshal.load(Marshal.dump(TEMPLATE))
+    cfg['issue_capture'] = 'skip'
+    v = check(cfg).find { |x| x.rule == :unknown_key }
+    assert_equal :error, v.severity
+    assert_equal 'issue_capture', v.key
+    assert_match(/nests keys under this one — expected a mapping, not a scalar/, v.message)
+  end
+
   def test_populated_list_satisfies_an_empty_template_list
     cfg = Marshal.load(Marshal.dump(TEMPLATE))
     cfg['issue_capture']['sources'] = %w[email webform]
@@ -343,6 +352,15 @@ class SemanticTest < Minitest::Test
     assert_match(/ledger_path/, v.message)
   end
 
+  def test_repo_relative_state_path_in_a_public_repo_is_an_error
+    cfg = base
+    cfg['repositories'] = [{ 'visibility' => 'public' }]
+    cfg['issue_capture']['ledger_path'] = 'state/ledger.md'
+    v = rule(cfg, :state_paths_not_public)
+    assert_equal :error, v.severity
+    assert_match(/ledger_path/, v.message)
+  end
+
   def test_enabled_capture_without_pull_index_is_an_error
     cfg = base
     cfg['scheduled_jobs']['outputs']['index_path'] = ''
@@ -374,6 +392,12 @@ class SemanticTest < Minitest::Test
     cfg = base
     cfg['scheduled_jobs']['outputs']['index_path'] = 'state/index.md'
     assert_nil rule(cfg, :index_not_public)
+  end
+
+  def test_repo_relative_state_path_in_a_private_repo_is_fine
+    cfg = base
+    cfg['issue_capture']['ledger_path'] = 'state/ledger.md'
+    assert_nil rule(cfg, :state_paths_not_public)
   end
 
   def test_public_repo_index_with_capture_disabled_is_fine
@@ -500,6 +524,12 @@ class SemanticTest < Minitest::Test
     cfg['repositories'][0]['visibility'] = 'public'
     cfg['scheduled_jobs']['outputs']['index_path'] = '/var/steward/index.md'
     assert_nil rule(cfg, :index_not_public)
+  end
+
+  def test_absolute_state_paths_in_a_public_repo_is_fine
+    cfg = base
+    cfg['repositories'][0]['visibility'] = 'public'
+    assert_nil rule(cfg, :state_paths_not_public)
   end
 end
 

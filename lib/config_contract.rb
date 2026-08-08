@@ -54,6 +54,7 @@ module ConfigContract
   SEMANTIC_RULES = %i[
     alarms_to_required
     capture_state_paths_required
+    state_paths_not_public
     pull_index_required
     index_not_public
     marker_needs_watchdog
@@ -127,11 +128,18 @@ module ConfigContract
       # `path` sits at or below some template leaf, the mirror image of
       # covered?'s documented "template-empty/config-populated" direction above.
       next if tpl_leaves.any? { |t| covered?(t, [path]) }
+      tpl_nests_here = tpl_leaves.any? { |t| strict_descendant_of?(t, path) }
       # unknown-key loop — an empty collection here stands in for whatever the
       # template puts under it; the collection root is not an unknown key.
-      next if cfg_empty.include?(path) && tpl_leaves.any? { |t| strict_descendant_of?(t, path) }
+      next if cfg_empty.include?(path) && tpl_nests_here
 
-      violations << err(:unknown_key, path, 'not a key in setup/config.template.yaml — check the spelling')
+      message = if tpl_nests_here
+                  'setup/config.template.yaml nests keys under this one — expected a mapping, not a scalar'
+                else
+                  'not a key in setup/config.template.yaml — check the spelling'
+                end
+
+      violations << err(:unknown_key, path, message)
     end
 
     (tpl_leaves - cfg_leaves).sort.each do |path|
@@ -276,6 +284,7 @@ module ConfigContract
     capture = config.dig('issue_capture', 'enabled') == true
     monitor = config.dig('community', 'chat', 'monitor') == true
     marker  = config.dig('issue_capture', 'capture_marker')
+    platform = config.dig('community', 'chat', 'platform')
     reaction = config.dig('community', 'chat', 'capture_reaction')
     outputs = config.dig('scheduled_jobs', 'outputs') || {}
     index   = outputs['index_path']
@@ -295,6 +304,15 @@ module ConfigContract
         violations << err(:capture_state_paths_required, 'issue_capture',
                           "issue_capture.enabled requires private #{missing.join(', ')} " \
                           '(issue-capture/SKILL.md:19-21)')
+      end
+
+      public_state = CAPTURE_STATE_PATHS.select { |k| repo_relative?(config.dig('issue_capture', k)) }
+      if !public_state.empty? && public_repo?(config)
+        violations << err(:state_paths_not_public, 'issue_capture',
+                          "#{public_state.join(', ')} are repo-relative and this project lists a " \
+                          'public repository. Capture state holds the diverted-vulnerability audit ' \
+                          'trail and must not be a public surface (config.template.yaml:46-48). Use ' \
+                          'an absolute path if it lives in a private repo')
       end
 
       if blank?(index)
@@ -318,7 +336,10 @@ module ConfigContract
                         '(config.template.yaml:51)')
     end
 
-    if monitor && !blank?(reaction) && !watchdog
+    # Gated on platform being set: with platform blank, chat_needs_platform already
+    # reports monitoring as disabled, and firing this rule too would tell the
+    # adopter two contradictory things about the same run.
+    if monitor && !blank?(platform) && !blank?(reaction) && !watchdog
       violations << err(:reaction_needs_watchdog, 'community.chat.capture_reaction',
                         'a public capture reaction requires an enabled action-watchdog job ' \
                         '(issue-capture/SKILL.md:23-25)')
@@ -330,7 +351,7 @@ module ConfigContract
                         'a second capture path (config.template.yaml:44)')
     end
 
-    if monitor && blank?(config.dig('community', 'chat', 'platform'))
+    if monitor && blank?(platform)
       violations << err(:chat_needs_platform, 'community.chat.platform',
                         'a blank platform means chat monitoring is disabled, but monitor is true ' \
                         '(config.template.yaml:32)')
@@ -343,7 +364,8 @@ module ConfigContract
     if files.is_a?(Integer) && files.positive? && !watchdog
       violations << err(:public_files_need_watchdog, 'issue_capture.max_public_files_per_run',
                         'autonomous public filing requires an enabled action-watchdog ' \
-                        '(INFERRED from security-spine.md #6 self-test, not a literal config line)')
+                        '(INFERRED from security-spine.md §5 and the self-test at :152, not a ' \
+                        'literal config line)')
     end
 
     if config.dig('secrets', 'execute_contributor_code') == true &&
