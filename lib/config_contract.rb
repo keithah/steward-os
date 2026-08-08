@@ -236,8 +236,8 @@ module ConfigContract
       value = repo['visibility']
       next [] if VISIBILITIES.include?(value)
 
-      [Violation.new(severity: :error, rule: :type_enum, key: "repositories[#{i}].visibility",
-                     message: "expected one of #{VISIBILITIES.join(', ')}, got #{value.inspect}")]
+      [err(:type_enum, "repositories[#{i}].visibility",
+           "expected one of #{VISIBILITIES.join(', ')}, got #{value.inspect}")]
     end
   end
 

@@ -496,11 +496,21 @@ class SemanticTest < Minitest::Test
 
   # --- Safe escape hatches ---
   #
-  # Three rules fire on `precondition && !remedy`. The reds prove they fire when
+  # Four rules fire on `precondition && !remedy`. The reds prove they fire when
   # the remedy is absent; the green never reaches the precondition at all. So
   # nothing otherwise pins the corner where the precondition IS met and the
-  # adopter HAS applied the remedy the message tells them to apply. Drop either
-  # conjunct and the whole suite still passes — verified by mutation.
+  # adopter HAS applied the remedy the message tells them to apply.
+  #
+  # The two privacy rules (index_not_public, state_paths_not_public) get one
+  # test per conjunct, not one test total: the absolute-path test pins
+  # repo_relative?, the private-repo test pins public_repo?. A single test
+  # can't pin both, because an absolute path short-circuits the `&&` before
+  # public_repo? is ever evaluated. Don't consolidate these back to one test
+  # each — that asymmetry is exactly why there are two.
+  #
+  # assert_nil passes trivially whenever the rule fails to fire for any
+  # reason at all, so each assertion here is mutation-confirmed: drop any one
+  # of the four conjuncts across these rules and exactly one test below fails.
   #
   # This is the fail-closed direction, so it leaks nothing. It blocks every
   # correctly-configured adopter instead, which is the failure this corpus is
