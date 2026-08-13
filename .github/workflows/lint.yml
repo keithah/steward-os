@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  skills-contract:
+  contracts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,6 +18,13 @@ jobs:
         with:
           ruby-version: "3.3"
       - name: Unit tests
-        run: ruby test/skills_contract_test.rb
+        run: |
+          shopt -s nullglob
+          files=(test/*_test.rb)
+          if [ ${#files[@]} -eq 0 ]; then echo "no test files found"; exit 1; fi
+          for f in "${files[@]}"; do echo "== $f"; ruby "$f" || exit 1; done
+        shell: bash
       - name: Skills-contract lint
         run: ./bin/skills-contract-lint
+      - name: Config-contract lint
+        run: ./bin/config-lint
