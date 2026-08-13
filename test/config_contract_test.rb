@@ -76,7 +76,54 @@ class ExtractLoadTest < Minitest::Test
   end
 end
 
-# --- Phase 1: shape ---
+# --- repo_relative? / escapes_repo_root?: the privacy-classification primitive ---
+class RepoRelativeTest < Minitest::Test
+  def rel(path)
+    ConfigContract.repo_relative?(path)
+  end
+
+  def test_plain_relative_paths_are_repo_relative
+    assert rel('state/index.md')
+    assert rel('./index.md')
+    assert rel('a/b/../c.md') # normalizes to a/c.md, still inside
+    assert rel('index.md')
+  end
+
+  def test_absolute_and_home_and_uri_are_not_repo_relative
+    refute rel('/srv/steward/index.md')
+    refute rel('~/index.md')
+    refute rel('https://example.com/x')
+    refute rel('file:///etc/passwd')
+  end
+
+  def test_dotdot_escape_is_not_repo_relative
+    refute rel('../public-site/vulns.md')
+    refute rel('state/../../outside.md')
+  end
+
+  def test_resolving_back_to_the_repo_root_is_not_strictly_inside
+    refute rel('state/../') # depth 0 — the root itself, not a file inside
+  end
+
+  # Regression: a backslash-rooted or UNC path must be classified outside the
+  # repo, the same as its forward-slash form. Before separator normalization ran
+  # first, these slipped through as repo-relative and were omitted from the
+  # unverifiable warning — the double-suppression the traversal fix closed.
+  def test_backslash_rooted_and_unc_paths_are_not_repo_relative
+    refute rel('\\srv\\steward\\index.md'), 'backslash-rooted path escapes'
+    refute rel('\\\\host\\share\\index.md'), 'UNC path is outside the repo'
+    refute rel('..\\public\\x.md'), 'backslash traversal escapes'
+    refute rel('state\\..\\..\\x'), 'mixed-separator traversal escapes'
+  end
+
+  def test_drive_qualified_paths_are_not_repo_relative
+    refute rel('C:\\steward\\index.md')
+    refute rel('C:/steward/index.md')
+    refute rel('C:outside\\index.md'), 'drive-relative path is outside too'
+  end
+end
+
+
 class ShapeTest < Minitest::Test
   TEMPLATE = {
     'project' => { 'name' => '', 'repo' => '' },
@@ -147,6 +194,36 @@ class ShapeTest < Minitest::Test
     assert_includes rules(check(cfg)), :job_schedule_alternation
   end
 
+  def test_job_with_a_blank_schedule_value_is_an_error
+    cfg = Marshal.load(Marshal.dump(TEMPLATE))
+    cfg['scheduled_jobs']['jobs'][0]['every'] = ''
+    v = check(cfg).find { |x| x.rule == :job_schedule_blank }
+    assert_equal :error, v.severity
+    assert_match(/not a schedule/, v.message)
+  end
+
+  def test_job_with_a_null_cron_is_an_error
+    cfg = Marshal.load(Marshal.dump(TEMPLATE))
+    cfg['scheduled_jobs']['jobs'][1].delete('cron')
+    cfg['scheduled_jobs']['jobs'][1]['cron'] = nil
+    assert_includes rules(check(cfg)), :job_schedule_blank
+  end
+
+  def test_job_with_an_nbsp_only_schedule_is_an_error
+    cfg = Marshal.load(Marshal.dump(TEMPLATE))
+    cfg['scheduled_jobs']['jobs'][0]['every'] = "\u00A0"
+    assert_includes rules(check(cfg)), :job_schedule_blank
+  end
+
+  def test_job_with_a_non_string_schedule_is_an_error_and_reports_the_value
+    cfg = Marshal.load(Marshal.dump(TEMPLATE))
+    cfg['scheduled_jobs']['jobs'][0]['every'] = 3600
+    v = check(cfg).find { |x| x.rule == :job_schedule_blank }
+    assert_equal :error, v.severity
+    assert_match(/non-blank string/, v.message)
+    assert_match(/3600/, v.message)
+  end
+
   def test_missing_cron_on_a_job_is_not_a_missing_key
     cfg = Marshal.load(Marshal.dump(TEMPLATE))
     cfg['scheduled_jobs']['jobs'] = [{ 'name' => 'a', 'every' => '1h', 'enabled' => false }]
@@ -205,7 +282,7 @@ class TypeTest < Minitest::Test
         'ledger_path' => '', 'checkpoint_path' => '',
         'max_per_run' => 10, 'max_public_files_per_run' => 0
       },
-      'security' => { 'security_contact' => '' },
+      'security' => { 'security_contact' => '', 'security_sensitive_surfaces' => [] },
       'secrets' => { 'execute_contributor_code' => false, 'sandbox_available' => false },
       'scheduled_jobs' => {
         'jobs' => [{ 'name' => 'action-watchdog', 'every' => '6h', 'enabled' => false }],
@@ -265,6 +342,47 @@ class TypeTest < Minitest::Test
     assert_equal 'scheduled_jobs.jobs[0].enabled', find(cfg, :type_boolean).key
   end
 
+  def test_security_sensitive_surfaces_must_be_an_array_of_strings
+    cfg = base
+    cfg['security'] = { 'security_contact' => '', 'security_sensitive_surfaces' => { 'auth' => true } }
+    v = find(cfg, :type_string_array)
+    assert_equal :error, v.severity
+    assert_equal 'security.security_sensitive_surfaces', v.key
+  end
+
+  def test_security_sensitive_surfaces_rejects_a_blank_or_mixed_element
+    cfg = base
+    cfg['security'] = { 'security_contact' => '', 'security_sensitive_surfaces' => ['auth', '', 3] }
+    assert_equal :error, find(cfg, :type_string_array).severity
+  end
+
+  def test_security_sensitive_surfaces_empty_array_is_fine
+    cfg = base
+    cfg['security'] = { 'security_contact' => '', 'security_sensitive_surfaces' => [] }
+    assert_nil find(cfg, :type_string_array)
+  end
+
+  def test_security_sensitive_surfaces_good_array_is_fine
+    cfg = base
+    cfg['security'] = { 'security_contact' => '', 'security_sensitive_surfaces' => %w[auth payments] }
+    assert_nil find(cfg, :type_string_array)
+  end
+
+  def test_security_sensitive_surfaces_present_null_fails_closed
+    # A present-but-null security contract must not pass silently, exactly like
+    # every other present-null invariant key. (Absent is a phase-1 missing_key.)
+    cfg = base
+    cfg['security'] = { 'security_contact' => '', 'security_sensitive_surfaces' => nil }
+    assert_equal :error, find(cfg, :type_string_array).severity
+  end
+
+  def test_security_sensitive_surfaces_nbsp_only_element_is_blank
+    cfg = base
+    cfg['security'] = { 'security_contact' => '',
+                        'security_sensitive_surfaces' => ["auth", "\u00A0"] }
+    assert_equal :error, find(cfg, :type_string_array).severity
+  end
+
   def test_type_error_suppresses_later_phases
     cfg = base
     cfg['issue_capture']['enabled'] = 'false'
@@ -297,7 +415,8 @@ class SemanticTest < Minitest::Test
         'checkpoint_path' => '/srv/steward/checkpoint.md',
         'max_per_run' => 10, 'max_public_files_per_run' => 0
       },
-      'security' => { 'security_contact' => 'github-advisory' },
+      'security' => { 'security_contact' => 'github-advisory',
+                      'security_sensitive_surfaces' => ['auth'] },
       'secrets' => { 'execute_contributor_code' => false, 'sandbox_available' => false },
       'scheduled_jobs' => {
         'jobs' => [{ 'name' => 'action-watchdog', 'every' => '6h', 'enabled' => true }],
@@ -476,6 +595,112 @@ class SemanticTest < Minitest::Test
     cfg['community']['chat']['monitor'] = false
     cfg['issue_capture']['capture_marker'] = ''
     assert_nil rule(cfg, :destinations_unverifiable)
+  end
+
+  # --- Fix: traversal is outside the repo, not repo-relative (privacy fail-open) ---
+  def test_dotdot_escaped_index_is_not_repo_relative_and_warns
+    cfg = base
+    cfg['scheduled_jobs']['outputs']['index_path'] = '../public-site/vulns.md'
+    # No index_not_public error even in an all-private declaration…
+    assert_nil rule(cfg, :index_not_public)
+    # …but it is routed to the unverifiable warning as outside-the-repo.
+    w = rule(cfg, :destinations_unverifiable)
+    refute_nil w
+    assert_match(%r{index_path '\.\./public-site/vulns\.md'}, w.message)
+  end
+
+  def test_dotdot_escaped_index_in_a_public_repo_still_does_not_false_error
+    cfg = base
+    cfg['repositories'] = [{ 'visibility' => 'public' }]
+    cfg['scheduled_jobs']['outputs']['index_path'] = '../elsewhere/index.md'
+    # Outside the repo → undecidable, handled by the warning, not index_not_public.
+    assert_nil rule(cfg, :index_not_public)
+  end
+
+  def test_plain_repo_relative_index_is_still_repo_relative
+    cfg = base
+    cfg['repositories'] = [{ 'visibility' => 'public' }]
+    cfg['scheduled_jobs']['outputs']['index_path'] = 'state/index.md'
+    assert_equal :error, rule(cfg, :index_not_public).severity
+  end
+
+  # --- Fix: an enabled watchdog with a blank schedule provides no coverage ---
+  # A blank schedule is itself a phase-1 error (job_schedule_blank), which
+  # fail-closes phase 3. So the observable guarantee is: the config does NOT pass,
+  # and the semantic watchdog rules never get a chance to be fooled into passing.
+  def test_blank_scheduled_watchdog_fails_closed_before_semantics
+    cfg = base
+    cfg['scheduled_jobs']['jobs'][0]['every'] = ''
+    r = check(cfg).map(&:rule)
+    assert_includes r, :job_schedule_blank
+    assert_includes r, :phases_skipped
+  end
+
+  # Direct proof at the helper level: a blank-scheduled watchdog is not counted
+  # as coverage, so if phase 1 ever let it through, the marker rule would fire.
+  def test_watchdog_enabled_ignores_a_blank_scheduled_watchdog
+    cfg = base
+    cfg['scheduled_jobs']['jobs'][0]['every'] = ''
+    refute ConfigContract.watchdog_enabled?(cfg),
+           'an unschedulable watchdog must not count as watchdog coverage'
+  end
+
+  # --- Fix: unverifiable warning is exhaustive (security_contact + absolute state) ---
+  def test_non_sentinel_security_contact_appears_in_the_warning
+    cfg = base
+    cfg['security']['security_contact'] = '#security-team'
+    w = rule(cfg, :destinations_unverifiable)
+    refute_nil w
+    assert_match(/security_contact '#security-team'/, w.message)
+  end
+
+  def test_github_advisory_sentinel_is_not_listed_as_unverifiable
+    cfg = base
+    # base already uses the sentinel; only the always-outside index should list.
+    w = rule(cfg, :destinations_unverifiable)
+    refute_nil w
+    refute_match(/security_contact/, w.message)
+  end
+
+  def test_absolute_state_paths_appear_in_the_warning
+    cfg = base
+    w = rule(cfg, :destinations_unverifiable)
+    refute_nil w
+    assert_match(%r{issue_capture\.queue_path '/srv/steward/queue\.md'}, w.message)
+  end
+
+  # --- Fix: alarms_to must be an independent route ---
+  def test_alarms_to_equal_to_index_path_is_not_independent
+    cfg = base
+    cfg['scheduled_jobs']['outputs']['alarms_to'] = cfg['scheduled_jobs']['outputs']['index_path']
+    assert_equal :error, rule(cfg, :alarms_to_independent).severity
+  end
+
+  def test_alarms_to_equal_to_security_contact_is_not_independent
+    cfg = base
+    cfg['security']['security_contact'] = 'ops@example.com'
+    cfg['scheduled_jobs']['outputs']['alarms_to'] = 'ops@example.com'
+    assert_equal :error, rule(cfg, :alarms_to_independent).severity
+  end
+
+  def test_alarms_to_equal_to_a_state_path_is_not_independent
+    cfg = base
+    cfg['scheduled_jobs']['outputs']['alarms_to'] = cfg['issue_capture']['ledger_path']
+    assert_equal :error, rule(cfg, :alarms_to_independent).severity
+  end
+
+  def test_alarms_to_nbsp_padded_duplicate_of_security_contact_is_not_independent
+    # A Unicode-whitespace-padded duplicate must not dodge the independence rule
+    # the way an ASCII String#strip comparison would let it (round-2 gate finding).
+    cfg = base
+    cfg['security']['security_contact'] = 'ops@example.com'
+    cfg['scheduled_jobs']['outputs']['alarms_to'] = "\u00A0ops@example.com\u00A0"
+    assert_equal :error, rule(cfg, :alarms_to_independent).severity
+  end
+
+  def test_an_independent_alarms_to_is_fine
+    # base's alarms_to (ops@example.com) differs from every other destination.
+    assert_nil rule(base, :alarms_to_independent)
   end
 
   # The whole design rests on phase 1/2 errors suppressing phase 3. Prove it

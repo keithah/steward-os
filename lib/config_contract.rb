@@ -47,12 +47,22 @@ module ConfigContract
     issue_capture.max_public_files_per_run
   ].freeze
 
+  # Leaves the template declares as an open (empty) list that nonetheless carries
+  # a type invariant: each element must be a non-blank string. The shape phase
+  # lets a populated list satisfy the empty template leaf, but nothing there
+  # checks the element type — so a hash, a scalar, or a blank/mixed array would
+  # otherwise ride through and silently drop the surface-detection signal class.
+  ARRAY_OF_NON_BLANK_STRING_KEYS = %w[
+    security.security_sensitive_surfaces
+  ].freeze
+
   VISIBILITIES = %w[public private].freeze
 
   # Every semantic rule this phase can emit. Task 6's meta-test asserts each has
   # a red fixture — keep in sync when adding a rule.
   SEMANTIC_RULES = %i[
     alarms_to_required
+    alarms_to_independent
     capture_state_paths_required
     state_paths_not_public
     pull_index_required
@@ -160,12 +170,38 @@ module ConfigContract
   def self.job_schedule_violations(config)
     violations_for_each(config, 'scheduled_jobs', 'jobs') do |job, i|
       set = %w[every cron].count { |k| job.key?(k) }
-      next [] if set == 1
-
       name = job['name'].is_a?(String) ? job['name'] : "index #{i}"
-      [err(:job_schedule_alternation, "scheduled_jobs.jobs[#{i}]",
-           "job '#{name}' must set exactly one of every: or cron: (found #{set})")]
+
+      if set != 1
+        next [err(:job_schedule_alternation, "scheduled_jobs.jobs[#{i}]",
+                  "job '#{name}' must set exactly one of every: or cron: (found #{set})")]
+      end
+
+      # Exactly one key is present — but a present value that is not a non-blank
+      # string (`cron: null`, `every: ""`, `every: 3600`, an NBSP-only string) is
+      # not a schedule. An enabled-but-unschedulable job would otherwise satisfy
+      # every watchdog-dependent rule while never running.
+      unless schedule_valid?(job)
+        actual = job['every'].nil? ? job['cron'] : job['every']
+        next [err(:job_schedule_blank, "scheduled_jobs.jobs[#{i}]",
+                  "job '#{name}' sets every: or cron: but its value is not a non-blank string " \
+                  "(got #{actual.inspect}) — that is not a schedule")]
+      end
+
+      []
     end
+  end
+
+  # A job carries a usable schedule when exactly one of every:/cron: is present
+  # AND that one's value is a non-blank string. Used by both the schedule lint
+  # and watchdog_enabled? so an unschedulable watchdog can't satisfy the
+  # watchdog-dependent rules.
+  def self.schedule_valid?(job)
+    return false unless job.is_a?(Hash)
+    return false unless %w[every cron].count { |k| job.key?(k) } == 1
+
+    value = job['every'].nil? ? job['cron'] : job['every']
+    value.is_a?(String) && !blank?(value)
   end
 
   # Dotted-path read for non-list paths. List members are walked explicitly.
@@ -219,6 +255,18 @@ module ConfigContract
       violations << type_error(:type_non_negative_integer, path, value, 'an integer >= 0')
     end
 
+    ARRAY_OF_NON_BLANK_STRING_KEYS.each do |path|
+      value = fetch_path(config, path)
+      # An empty [] is a valid "no surfaces declared". Genuine absence is a
+      # phase-1 missing_key error that suppresses this whole phase, so reaching
+      # here with nil means the key is present-and-null (or a `security: {}`
+      # stand-in whose siblings also error) — a malformed security contract that
+      # must fail closed, exactly like every other present-null invariant key.
+      next if value.is_a?(Array) && value.all? { |e| e.is_a?(String) && !blank?(e) }
+
+      violations << type_error(:type_string_array, path, value, 'an array of non-blank strings')
+    end
+
     violations + repository_violations(config) + job_type_violations(config)
   end
 
@@ -255,29 +303,104 @@ module ConfigContract
     end
   end
 
+  # Blank = nil, or a string that is empty or ALL whitespace. Uses a
+  # Unicode-aware whitespace class ([[:space:]] matches U+00A0 NBSP and friends,
+  # which String#strip does NOT) so a visually-blank value can't masquerade as a
+  # real one. This is the single non-blank-string predicate: schedule values,
+  # destinations, and string-array elements all route through it so a NBSP-only
+  # entry fails closed everywhere, not just where strip happens to catch it.
   def self.blank?(value)
-    value.nil? || (value.is_a?(String) && value.strip.empty?)
+    value.nil? || (value.is_a?(String) && value.match?(/\A[[:space:]]*\z/))
   end
 
-  # No URI scheme, not absolute, not home-relative. Anything else is outside the
-  # repo and routes to the unverifiable warning instead of index_not_public.
-  # A Windows-style C:\ or C:/ path counts as outside — not a supported form,
-  # but calling it repo-relative would produce a false error. A drive-relative
-  # `C:foo` (no separator after the colon) is not matched by the regex below
-  # and so is still treated as repo-relative; nobody writes that in YAML.
+  # Trim leading/trailing whitespace with the SAME Unicode-aware class blank?
+  # uses ([[:space:]] catches U+00A0 NBSP etc., which String#strip does not).
+  # Used to normalize strings before an equality comparison — e.g. the alarms_to
+  # alias check — so an NBSP-padded duplicate can't dodge a route-independence
+  # rule the way an ASCII-strip'd comparison would let it.
+  def self.unicode_strip(str)
+    str.gsub(/\A[[:space:]]+|[[:space:]]+\z/, '')
+  end
+
+  # No URI scheme, not absolute, not home-relative, not drive-qualified, and —
+  # after normalizing `.`/`..` segments — still inside the repo root. Anything
+  # else is outside the repo and routes to the unverifiable warning instead of
+  # index_not_public.
+  #
+  # Backslashes are normalized to `/` FIRST so a Windows-style rooted path
+  # (`\srv\x`), a UNC path (`\\host\share\x`), or a mixed-separator path is
+  # classified the same as its forward-slash form. Without this the absolute and
+  # traversal checks run on the raw string and a backslash-rooted path slips
+  # through as repo-relative — the same fail-open double-suppression this method
+  # closes for `..`. Any `X:`-prefixed path is a Windows drive reference (rooted
+  # or drive-relative) and is treated as outside; nobody writes a repo-relative
+  # config path that begins with a drive letter and colon.
+  #
+  # A `..`-escaped path (`../public-site/vulns.md`) is exactly as undecidable as
+  # an absolute path: its privacy can't be settled statically. Classifying it as
+  # repo-relative was a fail-open hole — in an all-private declaration it
+  # suppressed both index_not_public AND the outside-repo warning. Normalize
+  # first, then treat any path that resolves at or above the repo root as
+  # outside/unverifiable.
   def self.repo_relative?(path)
     return false if blank?(path)
-    return false if path.include?('://') || path.start_with?('/', '~')
-    return false if path.match?(/\A[A-Za-z]:[\\\/]/)
+
+    normalized = path.tr('\\', '/')
+    return false if normalized.include?('://') || normalized.start_with?('/', '~')
+    return false if normalized.match?(/\A[A-Za-z]:/)
+    return false if escapes_repo_root?(normalized)
 
     true
+  end
+
+  # True when the `.`/`..` segments in a relative path resolve to the repo root
+  # itself or anywhere above it — i.e. the path does not stay strictly inside the
+  # repo. Pure string normalization (no filesystem access): a leading `..` or a
+  # traversal that pops past the root escapes. Backslashes are normalized to `/`
+  # so a mixed-separator `..\x` is caught too.
+  def self.escapes_repo_root?(path)
+    depth = 0
+    path.tr('\\', '/').split('/').each do |segment|
+      next if segment.empty? || segment == '.'
+
+      if segment == '..'
+        depth -= 1
+        return true if depth < 0
+      else
+        depth += 1
+      end
+    end
+    # depth == 0 means it resolved back to the repo root (e.g. `state/../`),
+    # which is not a file strictly inside the repo either.
+    depth <= 0
   end
 
   def self.watchdog_enabled?(config)
     jobs = config.dig('scheduled_jobs', 'jobs')
     return false unless jobs.is_a?(Array)
 
-    jobs.any? { |j| j.is_a?(Hash) && j['name'] == 'action-watchdog' && j['enabled'] == true }
+    # An enabled watchdog with no usable schedule never runs, so it does not
+    # count as watchdog coverage for the watchdog-dependent semantic rules.
+    jobs.any? do |j|
+      j.is_a?(Hash) && j['name'] == 'action-watchdog' && j['enabled'] == true && schedule_valid?(j)
+    end
+  end
+
+  # alarms_to must be an independent fallback. Reject the statically-decidable
+  # duplicates: the same string as security_contact, index_path, or any
+  # capture-state path. The subtler "different string but same inbox" case is
+  # not statically decidable and stays with the runtime preflight. Compared as
+  # trimmed strings so trailing whitespace can't dodge the check.
+  def self.alarms_to_aliased?(config, outputs)
+    target = outputs['alarms_to']
+    return false unless target.is_a?(String)
+
+    norm = unicode_strip(target)
+    return false if norm.empty?
+
+    others = [config.dig('security', 'security_contact'), outputs['index_path']]
+    others += CAPTURE_STATE_PATHS.map { |k| config.dig('issue_capture', k) }
+    others.any? { |o| o.is_a?(String) && unicode_strip(o) == norm }
   end
 
   def self.semantic_violations(config)
@@ -297,6 +420,11 @@ module ConfigContract
         violations << err(:alarms_to_required, 'scheduled_jobs.outputs.alarms_to',
                           'required when issue_capture.enabled — the divert needs an independent ' \
                           'human route even when security_contact is set (config.template.yaml:130)')
+      elsif alarms_to_aliased?(config, outputs)
+        violations << err(:alarms_to_independent, 'scheduled_jobs.outputs.alarms_to',
+                          'must be an independent human route — it duplicates security_contact, ' \
+                          'index_path, or a capture-state path, so the divert has no fallback ' \
+                          'distinct from the destination it is meant to back up (config.template.yaml:130)')
       end
 
       missing = CAPTURE_STATE_PATHS.select { |k| blank?(config.dig('issue_capture', k)) }
@@ -375,7 +503,7 @@ module ConfigContract
                         '(config.template.yaml:106)')
     end
 
-    violations + unverifiable_warning(capture, outputs, index)
+    violations + unverifiable_warning(config, outputs, index)
   end
 
   # Fail closed on "no declared repositories". An adopter who declares none
@@ -392,14 +520,34 @@ module ConfigContract
 
   # One grouped warning, not one per destination: three separate warnings would
   # fire on every correctly-configured adopter and train them to ignore output.
-  def self.unverifiable_warning(capture, outputs, index)
-    return [] unless capture
+  #
+  # "Confirm each" must be literally exhaustive: every destination whose privacy
+  # is not statically decidable belongs here. That is the outside-repo index, the
+  # digest/alarms channels, a non-sentinel security_contact (the preferred first
+  # destination for the scrubbed vuln summary — SKILL.md:22), and any absolute
+  # capture-state path (queue/ledger/checkpoint). Repo-relative destinations are
+  # decided by index_not_public / state_paths_not_public; blanks by their
+  # required-rules; the "github-advisory" sentinel is statically known-private.
+  def self.unverifiable_warning(config, outputs, index)
+    return [] unless config.dig('issue_capture', 'enabled') == true
 
     undecidable = 'channel privacy not statically decidable'
     unverifiable = []
     unverifiable << "index_path '#{index}' (outside the repo)" if !blank?(index) && !repo_relative?(index)
     unverifiable << "digest_to '#{outputs['digest_to']}' (#{undecidable})" unless blank?(outputs['digest_to'])
     unverifiable << "alarms_to '#{outputs['alarms_to']}' (#{undecidable})" unless blank?(outputs['alarms_to'])
+
+    security_contact = config.dig('security', 'security_contact')
+    if !blank?(security_contact) && security_contact != 'github-advisory'
+      unverifiable << "security_contact '#{security_contact}' (#{undecidable})"
+    end
+
+    CAPTURE_STATE_PATHS.each do |k|
+      value = config.dig('issue_capture', k)
+      next if blank?(value) || repo_relative?(value)
+
+      unverifiable << "issue_capture.#{k} '#{value}' (outside the repo)"
+    end
     return [] if unverifiable.empty?
 
     # The leading spaces below line the continuation up under Violation#to_line's
