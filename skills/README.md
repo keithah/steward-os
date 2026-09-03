@@ -19,6 +19,7 @@ they read your project's [`config.yaml`](../setup/config.template.yaml) for the 
 | [`triage-scoreboard`](triage-scoreboard/SKILL.md) | Steward | [scoreboard playbook](../docs/playbooks/triage-scoreboard.md) | A |
 | [`contributor-trust`](contributor-trust/SKILL.md) | Steward | [contributor recognition](../docs/lifecycle/contributor-recognition.md) trust ledger + [scoreboard playbook](../docs/playbooks/triage-scoreboard.md) | A |
 | [`action-watchdog`](action-watchdog/SKILL.md) | Steward | [watchdog pattern](../docs/playbooks/watchdog-pattern.md) | A |
+| [`hermes-pr-review`](hermes-pr-review/SKILL.md) | Hermes/Reviewer | [Hermes PR review gate](../docs/reference/hermes-pr-review-gate.md) | B |
 
 ## How skills are written here
 - **Generic, not project-specific.** A skill says "read the test command from config and run it,"
