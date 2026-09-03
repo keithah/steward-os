@@ -101,6 +101,58 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(len(manifests), 1)
         return json.loads(manifests[0].read_text())
 
+    def test_resolves_configuration_from_config_directory(self):
+        config_dir = self.root / "repositories"
+        config_dir.mkdir()
+        config_path = config_dir / "acme__widget.json"
+        config_path.write_text(json.dumps(self.config))
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(self.runner),
+                "--repo-dir",
+                str(self.repo),
+                "--config-dir",
+                str(config_dir),
+            ],
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(next(self.manifest_root.rglob("*.json")).read_text())["repository"], "acme/widget")
+
+    def test_rejects_mutually_exclusive_or_missing_config_directory_configuration(self):
+        config_dir = self.root / "repositories"
+        config_dir.mkdir()
+        conflicting = subprocess.run(
+            [
+                sys.executable,
+                str(self.runner),
+                "--repo-dir", str(self.repo),
+                "--config", str(self.config_path),
+                "--config-dir", str(config_dir),
+            ],
+            text=True,
+            capture_output=True,
+        )
+        missing = subprocess.run(
+            [
+                sys.executable,
+                str(self.runner),
+                "--repo-dir", str(self.repo),
+                "--config-dir", str(config_dir),
+            ],
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(conflicting.returncode, 2)
+        self.assertIn("not allowed with argument", conflicting.stderr)
+        self.assertEqual(missing.returncode, 1)
+        self.assertIn("configuration file is missing", missing.stderr)
+        self.assertFalse(list(self.manifest_root.rglob("*.json")))
+
     def test_writes_exact_state_for_clean_repository(self):
         result = self.run_runner()
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -83,6 +83,15 @@ def _origin_repository(repo_dir: Path) -> str:
         raise ReviewError(f"git command failed: {message}") from error
 
 
+def resolve_config_path(config_dir: Path, repo_dir: Path) -> Path:
+    repository = _origin_repository(repo_dir)
+    owner, name = repository.split("/", 1)
+    path = config_dir / f"{owner}__{name}.json"
+    if not path.is_file():
+        raise ReviewError(f"configuration file is missing: {path}")
+    return path
+
+
 def load_config(path: Path, repo_dir: Path) -> dict:
     try:
         config = json.loads(path.read_text())
@@ -268,11 +277,14 @@ def _config_revision(config: dict) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-dir", required=True, type=Path)
-    parser.add_argument("--config", required=True, type=Path)
+    config_group = parser.add_mutually_exclusive_group(required=True)
+    config_group.add_argument("--config", type=Path)
+    config_group.add_argument("--config-dir", type=Path)
     args = parser.parse_args()
     try:
         repo_dir = args.repo_dir.resolve()
-        config = load_config(args.config, repo_dir)
+        config_path = args.config or resolve_config_path(args.config_dir, repo_dir)
+        config = load_config(config_path, repo_dir)
         manifest = git_state(repo_dir, config["repository"]["base_ref"])
         manifest.update(
             {
@@ -287,7 +299,8 @@ def main() -> int:
         )
         if any(command["status"] == "failed" for command in manifest["commands"]):
             manifest["status"] = "blocked"
-        write_manifest(Path(config["paths"]["manifest_root"]), manifest)
+        manifest_path = write_manifest(Path(config["paths"]["manifest_root"]), manifest)
+        print(manifest_path)
         if manifest["status"] == "blocked":
             return 1
     except ReviewError as error:
