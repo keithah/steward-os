@@ -120,8 +120,12 @@ class StewardReviewTests(unittest.TestCase):
                 ).encode("utf-8")
             ).hexdigest(),
         )
+        self.assertEqual(manifest["lane"], "fast")
         self.assertEqual(manifest["commands"], [])
-        self.assertEqual(manifest["skipped_checks"], [])
+        self.assertEqual(
+            manifest["skipped_checks"],
+            [{"id": "test", "reason": "disabled by configuration"}],
+        )
         self.assertEqual(manifest["status"], "ready")
         self.assertEqual(
             self.manifest_root
@@ -144,6 +148,45 @@ class StewardReviewTests(unittest.TestCase):
         result = self.run_runner()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must be outside reviewed checkout", result.stderr)
+
+    def test_selects_visual_lane_and_skips_unsafe_commands(self):
+        (self.repo / "web").mkdir()
+        (self.repo / "web" / "page.html").write_text("<p>page</p>\n")
+        self.run_git("add", "web/page.html")
+        self.run_git("commit", "-m", "add web page")
+        self.config["review"]["commands"] = [
+            {"id": "format", "command": "printf format-ok", "execution": "safe"},
+            {"id": "sandboxed", "command": "printf must-not-run", "execution": "sandbox"},
+            {"id": "disabled", "command": "printf disabled", "execution": "disabled"},
+        ]
+        self.config["review"]["execute_contributor_code"] = False
+        self.config["review"]["sandbox_available"] = False
+        self.write_config()
+
+        result = self.run_runner()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = self.read_manifest()
+        self.assertEqual(manifest["lane"], "visual")
+        self.assertEqual([item["id"] for item in manifest["commands"]], ["format"])
+        self.assertEqual(manifest["commands"][0]["stdout"], "format-ok")
+        self.assertEqual(manifest["skipped_checks"], [
+            {"id": "sandboxed", "reason": "sandbox execution unavailable"},
+            {"id": "disabled", "reason": "disabled by configuration"},
+        ])
+
+    def test_records_failed_command_and_returns_blocked_manifest(self):
+        self.config["review"]["commands"] = [
+            {"id": "failing", "command": "sh -c 'exit 7'", "execution": "safe"}
+        ]
+        self.write_config()
+
+        result = self.run_runner()
+
+        self.assertEqual(result.returncode, 1)
+        manifest = self.read_manifest()
+        self.assertEqual(manifest["status"], "blocked")
+        self.assertEqual(manifest["commands"][0]["exit_code"], 7)
+
     def test_rejects_invalid_nested_configuration(self):
         cases = [
             ("unknown top-level key", lambda config: config.update(extra=True)),

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -19,6 +20,7 @@ _ORIGIN_PATTERNS = (
     re.compile(r"git@github\.com:([^/\s]+)/([^/\s]+)\.git"),
     re.compile(r"ssh://git@github\.com/([^/\s]+)/([^/\s]+)\.git"),
 )
+_CAPTURE_LIMIT = 16_384
 
 
 def _require_keys(value, allowed, required, label):
@@ -166,6 +168,65 @@ def git_state(repo_dir: Path, base_ref: str) -> dict:
         raise ReviewError(f"git command failed: {message}") from error
 
 
+def select_lane(changed_paths: list[str], review: dict) -> str:
+    def matches(patterns: list[str]) -> bool:
+        return any(
+            fnmatch.fnmatchcase(path, pattern)
+            for path in changed_paths
+            for pattern in patterns
+        )
+
+    if matches(review["visual_paths"]):
+        return "visual"
+    if matches(review["deep_paths"]) or matches(review["sensitive_paths"]):
+        return "deep"
+    return "fast"
+
+
+def _bounded_output(value: str) -> tuple[str, bool]:
+    return value[:_CAPTURE_LIMIT], len(value) > _CAPTURE_LIMIT
+
+
+def run_commands(repo_dir: Path, review: dict) -> tuple[list[dict], list[dict]]:
+    commands = []
+    skipped_checks = []
+    for configured in review["commands"]:
+        execution = configured["execution"]
+        if execution == "disabled":
+            skipped_checks.append(
+                {"id": configured["id"], "reason": "disabled by configuration"}
+            )
+            continue
+        if execution == "sandbox" and not (
+            review["execute_contributor_code"] and review["sandbox_available"]
+        ):
+            skipped_checks.append(
+                {"id": configured["id"], "reason": "sandbox execution unavailable"}
+            )
+            continue
+        result = subprocess.run(
+            configured["command"],
+            shell=True,
+            cwd=repo_dir,
+            text=True,
+            capture_output=True,
+        )
+        stdout, stdout_truncated = _bounded_output(result.stdout)
+        stderr, stderr_truncated = _bounded_output(result.stderr)
+        commands.append(
+            {
+                "id": configured["id"],
+                "execution": execution,
+                "status": "passed" if result.returncode == 0 else "failed",
+                "exit_code": result.returncode,
+                "stdout": stdout,
+                "stderr": stderr,
+                "truncated": stdout_truncated or stderr_truncated,
+            }
+        )
+    return commands, skipped_checks
+
+
 def _sanitize_branch(branch: str) -> str:
     sanitized = re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip(".-")
     if not sanitized:
@@ -217,12 +278,18 @@ def main() -> int:
             {
                 "base_ref": config["repository"]["base_ref"],
                 "config_revision": _config_revision(config),
-                "commands": [],
-                "skipped_checks": [],
                 "status": "ready",
+                "lane": select_lane(manifest["changed_paths"], config["review"]),
             }
         )
+        manifest["commands"], manifest["skipped_checks"] = run_commands(
+            repo_dir, config["review"]
+        )
+        if any(command["status"] == "failed" for command in manifest["commands"]):
+            manifest["status"] = "blocked"
         write_manifest(Path(config["paths"]["manifest_root"]), manifest)
+        if manifest["status"] == "blocked":
+            return 1
     except ReviewError as error:
         print(error, file=sys.stderr)
         return 1
