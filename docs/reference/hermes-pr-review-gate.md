@@ -10,11 +10,11 @@ The Hermes PR review gate produces local-only, exact-SHA review evidence before 
 
 ## Install the public procedure
 
-Keep this repository public-safe. Store live configuration, manifests, reports, credentials, repository inventories, and host-specific paths outside the reviewed checkout and outside this repository.
+Keep this repository public-safe. Store live configuration, manifests, reports, credentials, repository inventories, and host-specific paths outside the reviewed checkout and outside this repository. Configuration is optional: the runner has a safe built-in baseline for zero-setup use.
 
 1. Make the runner available from a trusted checkout of this repository.
-2. Copy [`setup/hermes-review-config.example.json`](../../setup/hermes-review-config.example.json) to a private configuration directory.
-3. Replace only the sanitized placeholders with your repository ID and private absolute state roots. Do not put secrets, tokens, hostnames, or live local paths in public files.
+2. Run it against a clean GitHub checkout. With no private configuration it discovers the local default branch, records evidence under `~/.config/steward-os/`, uses the deep lane, and runs no commands from the checkout.
+3. Optionally copy [`setup/hermes-review-config.example.json`](../../setup/hermes-review-config.example.json) to a private configuration directory when you need custom state roots, lane patterns, or trusted deterministic checks. Do not put secrets, tokens, hostnames, or live local paths in public files.
 4. Load [`skills/hermes-pr-review/SKILL.md`](../../skills/hermes-pr-review/SKILL.md) in Hermes for the review procedure.
 
 A sanitized configuration has this complete shape:
@@ -54,15 +54,13 @@ All state roots must be absolute, distinct, and outside the reviewed checkout. T
 
 ## Run the evidence collector
 
-From the public runner checkout, invoke the runner with a clean target repository and private configuration:
+From the public runner checkout, invoke the runner with a clean target repository:
 
 ```sh
-python3 scripts/steward_review.py \
-  --repo-dir /path/to/repository \
-  --config /private/steward-os/repositories/owner__repository.json
+python3 scripts/steward_review.py --repo-dir /path/to/repository
 ```
 
-The runner refuses a dirty checkout, mismatched origin/config identity, invalid configuration, state roots inside the checkout, a post-command Git-state change, or failed eligible command. Each eligible host command is bounded by `command_timeout_seconds`; a timeout is recorded as failed and produces a `blocked` manifest. It writes a manifest only after valid Git/configuration state is resolved.
+To override the baseline, add `--config /private/steward-os/repositories/owner__repository.json` or `--config-dir /private/steward-os/repositories`. The runner refuses a dirty checkout, invalid optional configuration, a mismatched origin/config identity, state roots inside the checkout, a post-command Git-state change, or failed eligible command. Each eligible host command is bounded by `command_timeout_seconds`; a timeout is recorded as failed and produces a `blocked` manifest. It writes a manifest only after valid Git/configuration state is resolved.
 
 The manifest is local-only JSON at:
 
@@ -88,7 +86,7 @@ No verified blocker found in this Steward pass.
 
 ## `steward` and `run steward`
 
-`steward` is the terminal entrypoint. It runs the configured local runner first; only a ready manifest may be passed to Hermes for the public `hermes-pr-review` procedure. It must not use GitHub write operations.
+`steward` is the terminal entrypoint. It runs the local runner first, using the safe built-in baseline when no per-repository override exists; only a ready manifest may be passed to Hermes for the public `hermes-pr-review` procedure. It must not use GitHub write operations.
 
 `run steward` is the chat invocation of the same gate on the current committed branch. Hermes runs the local runner, reads the resulting manifest, and follows the public procedure. It is read-only with respect to GitHub objects and writes only its local report outside the public checkout.
 

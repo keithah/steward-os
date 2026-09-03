@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -174,8 +175,8 @@ class StewardReviewTests(unittest.TestCase):
         self.assertIn("configuration path must be outside the reviewed checkout", result.stderr)
         self.assertFalse(self.manifest_root.exists())
 
-    def test_rejects_mutually_exclusive_or_missing_config_directory_configuration(self):
-        """Exercise the Steward review gate behavior."""
+    def test_rejects_mutually_exclusive_configuration_flags(self):
+        """An explicit config path and config directory cannot be combined."""
         config_dir = self.root / "repositories"
         config_dir.mkdir()
         conflicting = subprocess.run(
@@ -189,22 +190,55 @@ class StewardReviewTests(unittest.TestCase):
             text=True,
             capture_output=True,
         )
-        missing = subprocess.run(
+
+        self.assertEqual(conflicting.returncode, 2)
+        self.assertIn("not allowed with argument", conflicting.stderr)
+
+    def test_uses_builtin_default_when_no_private_config_exists(self):
+        """A clean GitHub checkout can receive local-only evidence without setup."""
+        state_root = self.root / "default-state"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(self.runner),
+                "--repo-dir", str(self.repo),
+            ],
+            env={**os.environ, "STEWARD_STATE_ROOT": str(state_root)},
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest_path = Path(result.stdout.strip())
+        self.assertTrue(manifest_path.is_file())
+        manifest = json.loads(manifest_path.read_text())
+        self.assertEqual(manifest["repository"], "acme/widget")
+        self.assertEqual(manifest["base_ref"], "main")
+        self.assertEqual(manifest["lane"], "deep")
+        self.assertEqual(manifest["commands"], [])
+        self.assertEqual(manifest["config_source"], "builtin-default")
+        self.assertEqual(state_root.stat().st_mode & 0o777, 0o700)
+
+    def test_uses_builtin_default_when_config_directory_has_no_match(self):
+        """An absent optional per-repository override falls back safely."""
+        config_dir = self.root / "repositories"
+        config_dir.mkdir()
+        state_root = self.root / "default-state"
+        result = subprocess.run(
             [
                 sys.executable,
                 str(self.runner),
                 "--repo-dir", str(self.repo),
                 "--config-dir", str(config_dir),
             ],
+            env={**os.environ, "STEWARD_STATE_ROOT": str(state_root)},
             text=True,
             capture_output=True,
         )
 
-        self.assertEqual(conflicting.returncode, 2)
-        self.assertIn("not allowed with argument", conflicting.stderr)
-        self.assertEqual(missing.returncode, 1)
-        self.assertIn("configuration file is missing", missing.stderr)
-        self.assertFalse(list(self.manifest_root.rglob("*.json")))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads(Path(result.stdout.strip()).read_text())
+        self.assertEqual(manifest["config_source"], "builtin-default")
 
     def test_writes_exact_state_for_clean_repository(self):
         """Exercise the Steward review gate behavior."""
