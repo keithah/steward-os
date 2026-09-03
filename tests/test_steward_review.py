@@ -136,6 +136,15 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(next(self.manifest_root.rglob("*.json")).read_text())["repository"], "acme/widget")
 
+    def test_accepts_github_origin_without_dot_git_suffix(self):
+        """Bind a standard suffix-free GitHub remote to its private config."""
+        self.run_git("remote", "set-url", "origin", "https://github.com/acme/widget")
+
+        result = self.run_runner()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.read_manifest()["repository"], "acme/widget")
+
     def test_rejects_configuration_inside_the_reviewed_checkout(self):
         """Reject repo-controlled configuration before any command can run."""
         checkout_config = self.repo / "steward-review.json"
@@ -329,6 +338,32 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(manifest["commands"][0]["status"], "failed")
         self.assertEqual(manifest["commands"][0]["exit_code"], None)
         self.assertIn("timed out after 1 seconds", manifest["commands"][0]["stderr"])
+
+    def test_timeout_message_preserves_stderr_capture_bound(self):
+        """Keep timeout diagnostics within the documented evidence cap."""
+        self.config["review"].update(
+            command_timeout_seconds=1,
+            commands=[
+                {
+                    "id": "noisy-hang",
+                    "command": (
+                        f"{shlex.quote(sys.executable)} -c \"import sys, time; "
+                        "sys.stderr.write('x' * 20000); sys.stderr.flush(); time.sleep(5)\""
+                    ),
+                    "execution": "safe",
+                }
+            ],
+        )
+        self.write_config()
+
+        result = self.run_runner()
+        manifest = self.read_manifest()
+        evidence = manifest["commands"][0]
+
+        self.assertEqual(result.returncode, 1)
+        self.assertTrue(evidence["truncated"])
+        self.assertLessEqual(len(evidence["stderr"].encode("utf-8")), 16_384)
+        self.assertIn("timed out after 1 seconds", evidence["stderr"])
 
     def test_caps_command_output_in_evidence(self):
         """Exercise the Steward review gate behavior."""

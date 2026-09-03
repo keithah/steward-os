@@ -61,7 +61,7 @@ A live configuration is JSON at `<config-dir>/<owner>__<repo>.json`:
 
 `execution` is exactly one of `safe`, `sandbox`, or `disabled`. Config paths must be absolute, must not resolve inside the reviewed checkout, and must be distinct. The config revision is the SHA-256 of canonical JSON (`sort_keys=True`, compact separators). The runner does not support environment interpolation or secret values.
 
-The manifest is JSON under `<manifest_root>/<owner>__<repo>/branch-<sanitized-branch>/<head_sha>.json` and contains `status`, `repository`, `branch`, `head_sha`, `base_ref`, `base_sha`, `merge_base_sha`, `config_revision`, `lane`, `changed_paths`, `commands`, and `skipped_checks`. Command output is bounded to 16,384 UTF-8 characters per stream, preserving a `truncated` boolean. `status` is `ready` only if configuration/Git validation succeeds and every eligible configured command exits 0; otherwise it is `blocked`.
+The manifest is JSON under `<manifest_root>/<owner>__<repo>/branch-<sanitized-branch>/<head_sha>.json` and contains `status`, `repository`, `branch`, `head_sha`, `base_ref`, `base_sha`, `merge_base_sha`, `config_revision`, `lane`, `changed_paths`, `commands`, and `skipped_checks`. Command output is bounded to 16,384 UTF-8 bytes per stream, preserving a `truncated` boolean. `status` is `ready` only if configuration/Git validation succeeds and every eligible configured command exits 0; otherwise it is `blocked`.
 
 ### Task 1: Exact Git State and Local Configuration Validation
 

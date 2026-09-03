@@ -17,9 +17,9 @@ class ReviewError(Exception):
 
 
 _ORIGIN_PATTERNS = (
-    re.compile(r"https://github\.com/([^/\s]+)/([^/\s]+)\.git"),
-    re.compile(r"git@github\.com:([^/\s]+)/([^/\s]+)\.git"),
-    re.compile(r"ssh://git@github\.com/([^/\s]+)/([^/\s]+)\.git"),
+    re.compile(r"https://github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?"),
+    re.compile(r"git@github\.com:([^/\s]+)/([^/\s]+?)(?:\.git)?"),
+    re.compile(r"ssh://git@github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?"),
 )
 _CAPTURE_LIMIT = 16_384
 
@@ -242,12 +242,31 @@ def select_lane(changed_paths: list[str], review: dict) -> str:
     return "fast"
 
 
+def _bounded_text(value: str) -> tuple[str, bool]:
+    """Return a UTF-8 byte-bounded string and whether it was truncated."""
+    encoded = value.encode("utf-8")
+    if len(encoded) <= _CAPTURE_LIMIT:
+        return value, False
+    return encoded[:_CAPTURE_LIMIT].decode("utf-8", errors="ignore"), True
+
+
+def _append_bounded_text(value: str, suffix: str) -> tuple[str, bool]:
+    """Append a diagnostic while preserving the UTF-8 evidence byte cap."""
+    suffix_bytes = suffix.encode("utf-8")
+    if len(suffix_bytes) >= _CAPTURE_LIMIT:
+        return _bounded_text(suffix)
+    prefix_limit = _CAPTURE_LIMIT - len(suffix_bytes)
+    prefix = value.encode("utf-8")[:prefix_limit].decode("utf-8", errors="ignore")
+    combined = prefix + suffix
+    return combined, len(prefix.encode("utf-8")) < len(value.encode("utf-8"))
+
+
 def _read_capped_output(handle) -> tuple[str, bool]:
-    """Run a Steward review helper."""
+    """Read bounded UTF-8 output from a temporary command-output file."""
     handle.seek(0, os.SEEK_END)
     observed_bytes = handle.tell()
     handle.seek(0)
-    return handle.read(_CAPTURE_LIMIT).decode("utf-8", errors="replace"), observed_bytes > _CAPTURE_LIMIT
+    return handle.read(_CAPTURE_LIMIT).decode("utf-8", errors="ignore"), observed_bytes > _CAPTURE_LIMIT
 
 
 def _terminate_process_group(process: subprocess.Popen, signal_number: int) -> None:
@@ -287,7 +306,10 @@ def _run_command(repo_dir: Path, command: str, timeout_seconds: int) -> dict:
         stdout, stdout_truncated = _read_capped_output(stdout_file)
         stderr, stderr_truncated = _read_capped_output(stderr_file)
     if timed_out:
-        stderr = f"{stderr}\ncommand timed out after {timeout_seconds} seconds".lstrip()
+        stderr, timeout_truncated = _append_bounded_text(
+            stderr, f"\ncommand timed out after {timeout_seconds} seconds"
+        )
+        stderr_truncated = stderr_truncated or timeout_truncated
     return {
         "exit_code": exit_code,
         "stdout": stdout,
