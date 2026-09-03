@@ -339,10 +339,11 @@ def _sanitize_branch(branch: str) -> str:
 def write_manifest(manifest_root: Path, manifest: dict) -> Path:
     """Run a Steward review helper."""
     owner, repository = manifest["repository"].split("/", 1)
+    branch_segment = _sanitize_branch(manifest["branch"]) if manifest["branch"] else manifest["head_sha"]
     destination = (
         manifest_root
         / f"{owner}__{repository}"
-        / f"branch-{_sanitize_branch(manifest['branch'])}"
+        / f"branch-{branch_segment}"
         / f"{manifest['head_sha']}.json"
     )
     destination.parent.mkdir(parents=True, exist_ok=True)

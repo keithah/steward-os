@@ -430,6 +430,25 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(manifest["status"], "blocked")
         self.assertIn("base ref changed", manifest["post_command_state"]["reason"])
 
+    def test_writes_detached_head_manifest_under_head_sha_segment(self):
+        """Store detached-HEAD evidence without requiring a branch name."""
+        manifest = {
+            "repository": "acme/widget",
+            "branch": "",
+            "head_sha": self.feature_head,
+        }
+
+        destination = steward_review.write_manifest(self.manifest_root, manifest)
+
+        self.assertEqual(
+            destination,
+            self.manifest_root
+            / "acme__widget"
+            / f"branch-{self.feature_head}"
+            / f"{self.feature_head}.json",
+        )
+        self.assertEqual(json.loads(destination.read_text()), manifest)
+
     def test_records_failed_command_and_returns_blocked_manifest(self):
         """Exercise the Steward review gate behavior."""
         self.config["review"]["commands"] = [
@@ -452,8 +471,8 @@ class StewardReviewTests(unittest.TestCase):
             "python3 scripts/steward_review.py",
             "No verified blocker found in this Steward pass.",
             "do not create or alter any GitHub object",
-            "adversarial review",
-            "configuration revision",
+            "**primary review** for the selected lane",
+            "When the selected lane is `deep` or `visual`",
             "config_revision",
         ]
         for value in required:
