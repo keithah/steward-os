@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 
@@ -261,50 +262,66 @@ def _append_bounded_text(value: str, suffix: str) -> tuple[str, bool]:
     return combined, len(prefix.encode("utf-8")) < len(value.encode("utf-8"))
 
 
-def _read_capped_output(handle) -> tuple[str, bool]:
-    """Read bounded UTF-8 output from a temporary command-output file."""
-    handle.seek(0, os.SEEK_END)
-    observed_bytes = handle.tell()
-    handle.seek(0)
-    return handle.read(_CAPTURE_LIMIT).decode("utf-8", errors="ignore"), observed_bytes > _CAPTURE_LIMIT
-
-
 def _terminate_process_group(process: subprocess.Popen, signal_number: int) -> None:
-    """Run a Steward review helper."""
+    """Terminate the command's launch process group when it still exists."""
     try:
         os.killpg(process.pid, signal_number)
     except ProcessLookupError:
         pass
 
 
+def _drain_stream(stream, result: dict) -> None:
+    """Continuously drain one pipe while retaining only capped UTF-8 evidence."""
+    captured = bytearray()
+    truncated = False
+    while chunk := stream.read(8_192):
+        remaining = _CAPTURE_LIMIT - len(captured)
+        if remaining > 0:
+            captured.extend(chunk[:remaining])
+        truncated = truncated or len(chunk) > remaining
+    result["output"] = bytes(captured).decode("utf-8", errors="ignore")
+    result["truncated"] = truncated
+
+
 def _run_command(repo_dir: Path, command: str, timeout_seconds: int) -> dict:
-    """Run a Steward review helper."""
-    with tempfile.TemporaryFile(mode="w+b") as stdout_file, tempfile.TemporaryFile(
-        mode="w+b"
-    ) as stderr_file:
-        process = subprocess.Popen(
-            command,
-            shell=True,
-            cwd=repo_dir,
-            stdout=stdout_file,
-            stderr=stderr_file,
-            start_new_session=True,
-        )
-        timed_out = False
+    """Run a bounded command and retain only capped output evidence."""
+    process = subprocess.Popen(
+        command,
+        shell=True,
+        cwd=repo_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    stdout_result = {}
+    stderr_result = {}
+    stdout_thread = threading.Thread(
+        target=_drain_stream, args=(process.stdout, stdout_result), daemon=True
+    )
+    stderr_thread = threading.Thread(
+        target=_drain_stream, args=(process.stderr, stderr_result), daemon=True
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+    timed_out = False
+    try:
+        process.wait(timeout=timeout_seconds)
+        exit_code = process.returncode
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        _terminate_process_group(process, signal.SIGTERM)
         try:
-            process.communicate(timeout=timeout_seconds)
-            exit_code = process.returncode
+            process.wait(timeout=1)
         except subprocess.TimeoutExpired:
-            timed_out = True
-            _terminate_process_group(process, signal.SIGTERM)
-            try:
-                process.communicate(timeout=1)
-            except subprocess.TimeoutExpired:
-                _terminate_process_group(process, signal.SIGKILL)
-                process.communicate()
-            exit_code = None
-        stdout, stdout_truncated = _read_capped_output(stdout_file)
-        stderr, stderr_truncated = _read_capped_output(stderr_file)
+            _terminate_process_group(process, signal.SIGKILL)
+            process.wait()
+        exit_code = None
+    stdout_thread.join()
+    stderr_thread.join()
+    stdout = stdout_result["output"]
+    stderr = stderr_result["output"]
+    stdout_truncated = stdout_result["truncated"]
+    stderr_truncated = stderr_result["truncated"]
     if timed_out:
         stderr, timeout_truncated = _append_bounded_text(
             stderr, f"\ncommand timed out after {timeout_seconds} seconds"

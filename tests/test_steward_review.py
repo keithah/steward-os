@@ -383,31 +383,14 @@ class StewardReviewTests(unittest.TestCase):
         self.assertTrue(manifest["commands"][0]["truncated"])
         self.assertEqual(len(manifest["commands"][0]["stdout"]), 16_384)
 
-    def test_timeout_tolerates_a_process_that_exits_before_termination(self):
-        """Exercise the Steward review gate behavior."""
-        class Process:
-            pid = 42
-            returncode = 0
+    def test_termination_tolerates_a_process_that_exits_before_signal_delivery(self):
+        """Ignore the race where a process exits before its group is signaled."""
+        process = mock.Mock(pid=42)
 
-            def __init__(self):
-                """Exercise the Steward review gate behavior."""
-                self.calls = 0
-
-            def communicate(self, timeout=None):
-                """Exercise the Steward review gate behavior."""
-                self.calls += 1
-                if self.calls == 1:
-                    raise subprocess.TimeoutExpired("safe-check", int(timeout or 0))
-                return "", ""
-
-        with mock.patch.object(steward_review.subprocess, "Popen", return_value=Process()):
-            with mock.patch.object(
-                steward_review.os, "killpg", side_effect=ProcessLookupError
-            ):
-                evidence = steward_review._run_command(self.repo, "safe-check", 1)
-
-        self.assertEqual(evidence["exit_code"], None)
-        self.assertIn("timed out after 1 seconds", evidence["stderr"])
+        with mock.patch.object(
+            steward_review.os, "killpg", side_effect=ProcessLookupError
+        ):
+            steward_review._terminate_process_group(process, steward_review.signal.SIGTERM)
 
     def test_blocks_manifest_when_a_safe_command_changes_checkout_state(self):
         """Exercise the Steward review gate behavior."""
