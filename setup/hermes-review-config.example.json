@@ -1,0 +1,24 @@
+{
+  "repository": {
+    "id": "owner/repository",
+    "base_ref": "main"
+  },
+  "paths": {
+    "report_root": "/private/steward-os/reports",
+    "manifest_root": "/private/steward-os/manifests"
+  },
+  "review": {
+    "sensitive_paths": [],
+    "visual_paths": [],
+    "deep_paths": [],
+    "execute_contributor_code": false,
+    "sandbox_available": false,
+    "commands": [
+      {
+        "id": "test",
+        "command": "python3 -m unittest",
+        "execution": "disabled"
+      }
+    ]
+  }
+}
