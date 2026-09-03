@@ -1,4 +1,10 @@
-# Hermes PR Review Gate
+---
+layout: default
+parent: Reference
+nav_order: 11
+---
+
+# Hermes PR review gate
 
 The Hermes PR review gate produces local-only, exact-SHA review evidence before a pull-request workflow continues. It does not create, update, approve, label, merge, push, deploy, or otherwise change GitHub state. A clean report is not approval or merge authority.
 
@@ -29,6 +35,8 @@ A sanitized configuration has this complete shape:
     "deep_paths": ["src/**"],
     "execute_contributor_code": false,
     "sandbox_available": false,
+    "command_timeout_seconds": 300,
+    "safe_commands_execute_reviewed_code": false,
     "commands": [
       {
         "id": "test",
@@ -40,7 +48,7 @@ A sanitized configuration has this complete shape:
 }
 ```
 
-The runner accepts only `safe`, `sandbox`, and `disabled` command execution modes. Commands are trusted operator-configured deterministic commands; a contributor does not gain command execution by changing the repository. Contributor-authored code is eligible only when `execute_contributor_code` and `sandbox_available` are both explicitly true and the command uses `sandbox`. `sandbox_available` is an operator attestation that a sandbox already exists; it does not provision or create a sandbox.
+The runner accepts only `safe`, `sandbox`, and `disabled` command execution modes. `safe` commands are trusted operator-configured deterministic commands and run on the host with `command_timeout_seconds`, an integer from 1 through 3600. Set `safe_commands_execute_reviewed_code` to `true` when a safe command would import, execute, or otherwise run files from the reviewed checkout; this runner rejects that configuration until a locked-down sandbox runtime is integrated. A contributor does not gain host execution by changing the repository. This first public runner has no integrated sandbox runtime: a `sandbox` command remains skipped while either sandbox flag is false, and configuration is rejected if both `execute_contributor_code` and `sandbox_available` are true for a sandbox command.
 
 All state roots must be absolute, distinct, and outside the reviewed checkout. The runner accepts no environment interpolation or secret values. The `config_revision` field is the SHA-256 of the canonical JSON configuration.
 
@@ -54,7 +62,7 @@ python3 scripts/steward_review.py \
   --config /private/steward-os/repositories/owner__repository.json
 ```
 
-The runner refuses a dirty checkout, mismatched origin/config identity, invalid configuration, state roots inside the checkout, or failed eligible command. It writes a manifest only after valid Git/configuration state is resolved. A failed eligible command produces a `blocked` manifest and a nonzero exit status.
+The runner refuses a dirty checkout, mismatched origin/config identity, invalid configuration, state roots inside the checkout, a post-command Git-state change, or failed eligible command. Each eligible host command is bounded by `command_timeout_seconds`; a timeout is recorded as failed and produces a `blocked` manifest. It writes a manifest only after valid Git/configuration state is resolved.
 
 The manifest is local-only JSON at:
 

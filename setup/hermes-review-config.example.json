@@ -13,6 +13,8 @@
     "deep_paths": [],
     "execute_contributor_code": false,
     "sandbox_available": false,
+    "command_timeout_seconds": 300,
+    "safe_commands_execute_reviewed_code": false,
     "commands": [
       {
         "id": "test",

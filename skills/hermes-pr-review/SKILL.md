@@ -11,7 +11,7 @@ Use this procedure only for a clean, committed branch. It creates local review e
 
 - Review configuration, manifests, and reports are local-only state and must remain outside the public checkout.
 - Runner commands are trusted operator configured deterministic commands. Do not treat contributor-authored commands as trusted.
-- `sandbox_available` is an explicit operator attestation that an appropriate sandbox already exists; it does not itself create a sandbox.
+- Host `safe` commands may not execute or import reviewed-checkout code; configurations must declare `safe_commands_execute_reviewed_code: true` for that case, which this runner rejects until a locked-down sandbox runtime is integrated. `sandbox` commands are likewise unsupported: with either sandbox flag false they are skipped; with both flags true the configuration is rejected rather than running on the host.
 - For this procedure, do not create or alter any GitHub object: no PRs, comments, reviews, approvals, labels, merges, pushes, releases, deployments, or settings changes.
 
 ## Procedure

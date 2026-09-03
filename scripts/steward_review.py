@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,7 @@ _CAPTURE_LIMIT = 16_384
 
 
 def _require_keys(value, allowed, required, label):
+    """Run a Steward review helper."""
     if not isinstance(value, dict):
         raise ReviewError(f"{label} must be an object")
     keys = set(value)
@@ -38,11 +40,13 @@ def _require_keys(value, allowed, required, label):
 
 
 def _require_nonblank_string(value, label):
+    """Run a Steward review helper."""
     if not isinstance(value, str) or not value.strip():
         raise ReviewError(f"{label} must be a non-blank string")
 
 
 def _require_string_list(value, label):
+    """Run a Steward review helper."""
     if not isinstance(value, list):
         raise ReviewError(f"{label} must be a list")
     for index, item in enumerate(value):
@@ -50,6 +54,7 @@ def _require_string_list(value, label):
 
 
 def _is_inside(path, directory):
+    """Run a Steward review helper."""
     try:
         path.relative_to(directory)
     except ValueError:
@@ -58,6 +63,7 @@ def _is_inside(path, directory):
 
 
 def _git(repo_dir: Path, *args: str) -> str:
+    """Run a Steward review helper."""
     return subprocess.run(
         ["git", *args],
         cwd=repo_dir,
@@ -68,6 +74,7 @@ def _git(repo_dir: Path, *args: str) -> str:
 
 
 def _repository_name(origin: str) -> str:
+    """Run a Steward review helper."""
     for pattern in _ORIGIN_PATTERNS:
         match = pattern.fullmatch(origin)
         if match:
@@ -76,6 +83,7 @@ def _repository_name(origin: str) -> str:
 
 
 def _origin_repository(repo_dir: Path) -> str:
+    """Run a Steward review helper."""
     try:
         return _repository_name(_git(repo_dir, "remote", "get-url", "origin"))
     except subprocess.CalledProcessError as error:
@@ -84,6 +92,7 @@ def _origin_repository(repo_dir: Path) -> str:
 
 
 def resolve_config_path(config_dir: Path, repo_dir: Path) -> Path:
+    """Run a Steward review helper."""
     repository = _origin_repository(repo_dir)
     owner, name = repository.split("/", 1)
     path = config_dir / f"{owner}__{name}.json"
@@ -93,6 +102,7 @@ def resolve_config_path(config_dir: Path, repo_dir: Path) -> Path:
 
 
 def load_config(path: Path, repo_dir: Path) -> dict:
+    """Run a Steward review helper."""
     try:
         config = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as error:
@@ -130,14 +140,23 @@ def load_config(path: Path, repo_dir: Path) -> dict:
         "deep_paths",
         "execute_contributor_code",
         "sandbox_available",
+        "command_timeout_seconds",
+        "safe_commands_execute_reviewed_code",
         "commands",
     }
     _require_keys(review, review_keys, review_keys, "review")
     for name in ("sensitive_paths", "visual_paths", "deep_paths"):
         _require_string_list(review[name], f"review.{name}")
-    for name in ("execute_contributor_code", "sandbox_available"):
+    for name in (
+        "execute_contributor_code",
+        "sandbox_available",
+        "safe_commands_execute_reviewed_code",
+    ):
         if not isinstance(review[name], bool):
             raise ReviewError(f"review.{name} must be a boolean")
+    timeout = review["command_timeout_seconds"]
+    if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 3_600:
+        raise ReviewError("review.command_timeout_seconds must be an integer from 1 to 3600")
     if not isinstance(review["commands"], list):
         raise ReviewError("review.commands must be a list")
     command_ids = set()
@@ -151,11 +170,20 @@ def load_config(path: Path, repo_dir: Path) -> dict:
         command_ids.add(command["id"])
         if command["execution"] not in {"safe", "sandbox", "disabled"}:
             raise ReviewError(f"{label}.execution must be safe, sandbox, or disabled")
+        if (
+            command["execution"] == "sandbox"
+            and review["execute_contributor_code"]
+            and review["sandbox_available"]
+        ):
+            raise ReviewError("sandbox runtime is not integrated")
+        if command["execution"] == "safe" and review["safe_commands_execute_reviewed_code"]:
+            raise ReviewError("safe commands that execute reviewed code require a sandbox runtime")
 
     return config
 
 
 def git_state(repo_dir: Path, base_ref: str) -> dict:
+    """Run a Steward review helper."""
     try:
         if _git(repo_dir, "status", "--porcelain"):
             raise ReviewError("working tree is dirty")
@@ -177,8 +205,30 @@ def git_state(repo_dir: Path, base_ref: str) -> dict:
         raise ReviewError(f"git command failed: {message}") from error
 
 
+def post_command_state(repo_dir: Path, initial_state: dict) -> dict:
+    """Run a Steward review helper."""
+    try:
+        reasons = []
+        if _git(repo_dir, "rev-parse", "HEAD") != initial_state["head_sha"]:
+            reasons.append("HEAD changed after quality commands")
+        if _git(repo_dir, "rev-parse", initial_state["base_ref"]) != initial_state["base_sha"]:
+            reasons.append("base ref changed after quality commands")
+        if _git(repo_dir, "merge-base", "HEAD", initial_state["base_ref"]) != initial_state["merge_base_sha"]:
+            reasons.append("merge base changed after quality commands")
+        if _git(repo_dir, "status", "--porcelain"):
+            reasons.append("working tree changed after quality commands")
+        if reasons:
+            return {"status": "failed", "reason": "; ".join(reasons)}
+        return {"status": "passed", "reason": ""}
+    except subprocess.CalledProcessError as error:
+        message = error.stderr.strip() or error.stdout.strip() or str(error)
+        return {"status": "failed", "reason": f"git revalidation failed: {message}"}
+
+
 def select_lane(changed_paths: list[str], review: dict) -> str:
+    """Run a Steward review helper."""
     def matches(patterns: list[str]) -> bool:
+        """Run a Steward review helper."""
         return any(
             fnmatch.fnmatchcase(path, pattern)
             for path in changed_paths
@@ -192,11 +242,62 @@ def select_lane(changed_paths: list[str], review: dict) -> str:
     return "fast"
 
 
-def _bounded_output(value: str) -> tuple[str, bool]:
-    return value[:_CAPTURE_LIMIT], len(value) > _CAPTURE_LIMIT
+def _read_capped_output(handle) -> tuple[str, bool]:
+    """Run a Steward review helper."""
+    handle.seek(0, os.SEEK_END)
+    observed_bytes = handle.tell()
+    handle.seek(0)
+    return handle.read(_CAPTURE_LIMIT).decode("utf-8", errors="replace"), observed_bytes > _CAPTURE_LIMIT
+
+
+def _terminate_process_group(process: subprocess.Popen, signal_number: int) -> None:
+    """Run a Steward review helper."""
+    try:
+        os.killpg(process.pid, signal_number)
+    except ProcessLookupError:
+        pass
+
+
+def _run_command(repo_dir: Path, command: str, timeout_seconds: int) -> dict:
+    """Run a Steward review helper."""
+    with tempfile.TemporaryFile(mode="w+b") as stdout_file, tempfile.TemporaryFile(
+        mode="w+b"
+    ) as stderr_file:
+        process = subprocess.Popen(
+            command,
+            shell=True,
+            cwd=repo_dir,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            start_new_session=True,
+        )
+        timed_out = False
+        try:
+            process.communicate(timeout=timeout_seconds)
+            exit_code = process.returncode
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            _terminate_process_group(process, signal.SIGTERM)
+            try:
+                process.communicate(timeout=1)
+            except subprocess.TimeoutExpired:
+                _terminate_process_group(process, signal.SIGKILL)
+                process.communicate()
+            exit_code = None
+        stdout, stdout_truncated = _read_capped_output(stdout_file)
+        stderr, stderr_truncated = _read_capped_output(stderr_file)
+    if timed_out:
+        stderr = f"{stderr}\ncommand timed out after {timeout_seconds} seconds".lstrip()
+    return {
+        "exit_code": exit_code,
+        "stdout": stdout,
+        "stderr": stderr,
+        "truncated": stdout_truncated or stderr_truncated,
+    }
 
 
 def run_commands(repo_dir: Path, review: dict) -> tuple[list[dict], list[dict]]:
+    """Run a Steward review helper."""
     commands = []
     skipped_checks = []
     for configured in review["commands"]:
@@ -213,30 +314,22 @@ def run_commands(repo_dir: Path, review: dict) -> tuple[list[dict], list[dict]]:
                 {"id": configured["id"], "reason": "sandbox execution unavailable"}
             )
             continue
-        result = subprocess.run(
-            configured["command"],
-            shell=True,
-            cwd=repo_dir,
-            text=True,
-            capture_output=True,
+        evidence = _run_command(
+            repo_dir, configured["command"], review["command_timeout_seconds"]
         )
-        stdout, stdout_truncated = _bounded_output(result.stdout)
-        stderr, stderr_truncated = _bounded_output(result.stderr)
         commands.append(
             {
                 "id": configured["id"],
                 "execution": execution,
-                "status": "passed" if result.returncode == 0 else "failed",
-                "exit_code": result.returncode,
-                "stdout": stdout,
-                "stderr": stderr,
-                "truncated": stdout_truncated or stderr_truncated,
+                "status": "passed" if evidence["exit_code"] == 0 else "failed",
+                **evidence,
             }
         )
     return commands, skipped_checks
 
 
 def _sanitize_branch(branch: str) -> str:
+    """Run a Steward review helper."""
     sanitized = re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip(".-")
     if not sanitized:
         raise ReviewError("branch must contain a filename-safe character")
@@ -244,6 +337,7 @@ def _sanitize_branch(branch: str) -> str:
 
 
 def write_manifest(manifest_root: Path, manifest: dict) -> Path:
+    """Run a Steward review helper."""
     owner, repository = manifest["repository"].split("/", 1)
     destination = (
         manifest_root
@@ -270,11 +364,13 @@ def write_manifest(manifest_root: Path, manifest: dict) -> Path:
 
 
 def _config_revision(config: dict) -> str:
+    """Run a Steward review helper."""
     canonical = json.dumps(config, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def main() -> int:
+    """Run a Steward review helper."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-dir", required=True, type=Path)
     config_group = parser.add_mutually_exclusive_group(required=True)
@@ -283,7 +379,9 @@ def main() -> int:
     args = parser.parse_args()
     try:
         repo_dir = args.repo_dir.resolve()
-        config_path = args.config or resolve_config_path(args.config_dir, repo_dir)
+        config_path = (args.config or resolve_config_path(args.config_dir, repo_dir)).resolve()
+        if _is_inside(config_path, repo_dir):
+            raise ReviewError("configuration path must be outside the reviewed checkout")
         config = load_config(config_path, repo_dir)
         manifest = git_state(repo_dir, config["repository"]["base_ref"])
         manifest.update(
@@ -297,7 +395,11 @@ def main() -> int:
         manifest["commands"], manifest["skipped_checks"] = run_commands(
             repo_dir, config["review"]
         )
-        if any(command["status"] == "failed" for command in manifest["commands"]):
+        manifest["post_command_state"] = post_command_state(repo_dir, manifest)
+        if (
+            any(command["status"] == "failed" for command in manifest["commands"])
+            or manifest["post_command_state"]["status"] == "failed"
+        ):
             manifest["status"] = "blocked"
         manifest_path = write_manifest(Path(config["paths"]["manifest_root"]), manifest)
         print(manifest_path)

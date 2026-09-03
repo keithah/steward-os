@@ -50,6 +50,8 @@ A live configuration is JSON at `<config-dir>/<owner>__<repo>.json`:
     "deep_paths": ["src/**"],
     "execute_contributor_code": false,
     "sandbox_available": false,
+    "command_timeout_seconds": 300,
+    "safe_commands_execute_reviewed_code": false,
     "commands": [
       {"id": "test", "command": "python3 -m unittest", "execution": "safe"}
     ]

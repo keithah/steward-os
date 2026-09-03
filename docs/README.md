@@ -66,6 +66,7 @@ Patterns that span multiple areas.
 - [Bug-shape catalog](reference/bug-shapes.md) — recurring bug classes and how to catch each.
 - [Anti-patterns](reference/anti-patterns.md) — the mistakes this system is designed to avoid.
 - [Security spine](reference/security-spine.md) — guardrail patterns in detail.
+- [Hermes PR review gate](reference/hermes-pr-review-gate.md) — local-only, exact-SHA evidence for review gates.
 
 ## Skills
 Loadable agent procedures live in [`skills/`](../skills/) and are linked from the playbook section
