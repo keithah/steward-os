@@ -42,7 +42,7 @@ A sanitized configuration has this complete shape:
 
 The runner accepts only `safe`, `sandbox`, and `disabled` command execution modes. Commands are trusted operator-configured deterministic commands; a contributor does not gain command execution by changing the repository. Contributor-authored code is eligible only when `execute_contributor_code` and `sandbox_available` are both explicitly true and the command uses `sandbox`. `sandbox_available` is an operator attestation that a sandbox already exists; it does not provision or create a sandbox.
 
-All state roots must be absolute, distinct, and outside the reviewed checkout. The runner accepts no environment interpolation or secret values. The configuration revision is the SHA-256 of the canonical JSON configuration.
+All state roots must be absolute, distinct, and outside the reviewed checkout. The runner accepts no environment interpolation or secret values. The `config_revision` field is the SHA-256 of the canonical JSON configuration.
 
 ## Run the evidence collector
 
@@ -62,7 +62,7 @@ The manifest is local-only JSON at:
 <manifest_root>/<owner>__<repo>/branch-<sanitized-branch>/<head_sha>.json
 ```
 
-It records the exact repository, branch, base ref, base SHA, merge-base SHA, head SHA, configuration revision, selected lane, changed paths, command results, skipped checks, and status. Command output is bounded and records whether it was truncated.
+It records the exact repository, branch, base ref, base SHA, merge-base SHA, head SHA, `config_revision`, selected lane, changed paths, command results, skipped checks, and status. Command output is bounded and records whether it was truncated.
 
 ## Lane behavior and Hermes review
 

@@ -248,6 +248,7 @@ class StewardReviewTests(unittest.TestCase):
             "do not create or alter any GitHub object",
             "adversarial review",
             "configuration revision",
+            "config_revision",
         ]
         for value in required:
             with self.subTest(value=value):
