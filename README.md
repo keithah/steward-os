@@ -70,6 +70,7 @@ it's what makes running the whole thing unattended *safe*.
    [pull requests](docs/lifecycle/pr-lifecycle.md), [quality gates](docs/lifecycle/quality-gates.md),
    [community](docs/lifecycle/community.md), [contributor recognition](docs/lifecycle/contributor-recognition.md).
 5. **Load the [skills](skills/)** as you enter each phase.
+6. **Run the [Hermes PR review gate](docs/reference/hermes-pr-review-gate.md)** for local-only, exact-SHA review evidence before a PR workflow.
 
 Full map: **[docs/README.md](docs/README.md)** · Published site: **<https://nesquena.github.io/steward-os/>**
 

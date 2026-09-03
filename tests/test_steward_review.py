@@ -187,6 +187,20 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(manifest["status"], "blocked")
         self.assertEqual(manifest["commands"][0]["exit_code"], 7)
 
+    def test_public_skill_has_required_local_only_contract(self):
+        skill_path = Path(__file__).resolve().parents[1] / "skills" / "hermes-pr-review" / "SKILL.md"
+        content = skill_path.read_text()
+        required = [
+            "python3 scripts/steward_review.py",
+            "No verified blocker found in this Steward pass.",
+            "do not create or alter any GitHub object",
+            "adversarial review",
+            "configuration revision",
+        ]
+        for value in required:
+            with self.subTest(value=value):
+                self.assertIn(value, content)
+
     def test_rejects_invalid_nested_configuration(self):
         cases = [
             ("unknown top-level key", lambda config: config.update(extra=True)),
