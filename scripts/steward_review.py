@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
+from typing import Optional
 
 
 class ReviewError(Exception):
@@ -92,14 +93,93 @@ def _origin_repository(repo_dir: Path) -> str:
         raise ReviewError(f"git command failed: {message}") from error
 
 
-def resolve_config_path(config_dir: Path, repo_dir: Path) -> Path:
+def resolve_config_path(config_dir: Path, repo_dir: Path) -> Optional[Path]:
     """Run a Steward review helper."""
     repository = _origin_repository(repo_dir)
     owner, name = repository.split("/", 1)
     path = config_dir / f"{owner}__{name}.json"
     if not path.is_file():
-        raise ReviewError(f"configuration file is missing: {path}")
+        return None
     return path
+
+
+def _default_base_ref(repo_dir: Path) -> str:
+    """Choose the checked-out repository's remote default branch without fetching."""
+    remote_head = subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+        cwd=repo_dir,
+        text=True,
+        capture_output=True,
+    )
+    candidates = []
+    if remote_head.returncode == 0 and remote_head.stdout.strip().startswith("origin/"):
+        candidates.append(remote_head.stdout.strip().removeprefix("origin/"))
+    candidates.extend(("main", "master"))
+    for candidate in candidates:
+        if subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{candidate}^{{commit}}"],
+            cwd=repo_dir,
+            capture_output=True,
+        ).returncode == 0:
+            return candidate
+    raise ReviewError("cannot determine a local default branch; provide a private repository configuration")
+
+
+def _builtin_state_root() -> Path:
+    """Return the private root used by the zero-configuration baseline."""
+    override = os.environ.get("STEWARD_STATE_ROOT")
+    if override is None:
+        return (Path.home() / ".config" / "steward-os").resolve()
+    root = Path(override)
+    if not root.is_absolute():
+        raise ReviewError("STEWARD_STATE_ROOT must be absolute")
+    return root.resolve()
+
+
+def _prepare_builtin_state_root(repo_dir: Path) -> Path:
+    """Create a private baseline root without altering any existing directory."""
+    state_root = _builtin_state_root()
+    if _is_inside(state_root, repo_dir):
+        raise ReviewError("built-in state root must be outside reviewed checkout")
+    try:
+        info = state_root.stat()
+    except FileNotFoundError:
+        try:
+            state_root.mkdir(parents=True, mode=0o700)
+        except FileExistsError:
+            return _prepare_builtin_state_root(repo_dir)
+        os.chmod(state_root, 0o700)
+        return state_root
+    if not state_root.is_dir():
+        raise ReviewError("built-in state root must be a directory")
+    if info.st_mode & 0o077:
+        raise ReviewError("existing built-in state root must be private")
+    return state_root
+
+
+def builtin_config(repo_dir: Path) -> dict:
+    """Provide a safe, local-only review baseline when no override exists."""
+    state_root = _builtin_state_root()
+    return {
+        "repository": {
+            "id": _origin_repository(repo_dir),
+            "base_ref": _default_base_ref(repo_dir),
+        },
+        "paths": {
+            "report_root": str(state_root / "reports"),
+            "manifest_root": str(state_root / "manifests"),
+        },
+        "review": {
+            "sensitive_paths": ["**"],
+            "visual_paths": [],
+            "deep_paths": ["**"],
+            "execute_contributor_code": False,
+            "sandbox_available": False,
+            "command_timeout_seconds": 300,
+            "safe_commands_execute_reviewed_code": False,
+            "commands": [],
+        },
+    }
 
 
 def load_config(path: Path, repo_dir: Path) -> dict:
@@ -413,21 +493,32 @@ def main() -> int:
     """Run a Steward review helper."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-dir", required=True, type=Path)
-    config_group = parser.add_mutually_exclusive_group(required=True)
+    config_group = parser.add_mutually_exclusive_group()
     config_group.add_argument("--config", type=Path)
     config_group.add_argument("--config-dir", type=Path)
     args = parser.parse_args()
     try:
         repo_dir = args.repo_dir.resolve()
-        config_path = (args.config or resolve_config_path(args.config_dir, repo_dir)).resolve()
-        if _is_inside(config_path, repo_dir):
-            raise ReviewError("configuration path must be outside the reviewed checkout")
-        config = load_config(config_path, repo_dir)
+        config_path = args.config
+        if config_path is None and args.config_dir is not None:
+            config_path = resolve_config_path(args.config_dir, repo_dir)
+        if config_path is None:
+            config = builtin_config(repo_dir)
+            config_source = "builtin-default"
+        else:
+            config_path = config_path.resolve()
+            if _is_inside(config_path, repo_dir):
+                raise ReviewError("configuration path must be outside the reviewed checkout")
+            config = load_config(config_path, repo_dir)
+            config_source = "private-override"
         manifest = git_state(repo_dir, config["repository"]["base_ref"])
+        if config_source == "builtin-default":
+            _prepare_builtin_state_root(repo_dir)
         manifest.update(
             {
                 "base_ref": config["repository"]["base_ref"],
                 "config_revision": _config_revision(config),
+                "config_source": config_source,
                 "status": "ready",
                 "lane": select_lane(manifest["changed_paths"], config["review"]),
             }

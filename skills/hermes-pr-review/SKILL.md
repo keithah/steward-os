@@ -17,13 +17,16 @@ Use this procedure only for a clean, committed branch. It creates local review e
 ## Procedure
 
 1. Confirm the target repository is clean and identify its committed `HEAD`. Do not stash, reset, commit, or otherwise mutate it to make it reviewable.
-2. Invoke the configured runner for that checkout, for example:
+2. Invoke the runner for that checkout. With no private configuration, it uses
+   its safe built-in baseline: GitHub origin/local-default-branch discovery,
+   local evidence storage, the deep lane, and no configured commands:
 
    ```sh
-   python3 scripts/steward_review.py --repo-dir /path/to/repository --config /private/steward-os/repositories/owner__repository.json
+   python3 scripts/steward_review.py --repo-dir /path/to/repository
    ```
 
-   The runner must use trusted operator configuration stored outside the public checkout.
+   An optional trusted operator configuration stored outside the public checkout
+   may override that baseline.
 3. Read the manifest path emitted by the runner. Verify its `repository`, `branch`, `base_sha`, `merge_base_sha`, `head_sha`, `lane`, and `config_revision` (the configuration revision) all bind to the branch being reviewed.
 4. If the manifest status is `blocked`, stop. Record the blocked command or validation evidence locally; do not continue to a clean conclusion.
 5. Inspect the deterministic evidence in every manifest command result and skipped check. Inspect the diff and changed paths, repository instructions, and relevant implementation and test paths. If a current PR exists, inspect its current checks and comments as read-only evidence.
