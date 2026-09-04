@@ -79,7 +79,26 @@ def _labels(value: object) -> list[str]:
 
 
 def _review_status(reviews: object) -> str:
-    states = {str(review.get("state", "")).upper() for review in _objects(reviews)}
+    """Summarize each reviewer's active review after chronological dismissals."""
+    review_objects = _objects(reviews)
+    active_by_reviewer: dict[str, list[int]] = {}
+    for index, review in enumerate(review_objects):
+        user = review.get("user")
+        login = user.get("login") if isinstance(user, Mapping) else None
+        reviewer = login if isinstance(login, str) and login else f"anonymous-review-{index}"
+        active = active_by_reviewer.setdefault(reviewer, [])
+        if str(review.get("state", "")).upper() == "DISMISSED":
+            if active:
+                active.pop()
+            continue
+        active.append(index)
+
+    states = {
+        str(review_objects[index].get("state", "")).upper()
+        for active in active_by_reviewer.values()
+        if active
+        for index in [active[-1]]
+    }
     if "CHANGES_REQUESTED" in states:
         return "changes_requested"
     if "APPROVED" in states:
