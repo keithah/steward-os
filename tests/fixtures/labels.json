@@ -1,0 +1,22 @@
+{
+  "repositories": ["keithah/fixture"],
+  "onboarded_repositories": ["keithah/fixture"],
+  "responses": {
+    "repos/keithah/fixture/pulls": [
+      {"number": 1, "draft": false},
+      {"number": 2, "draft": false},
+      {"number": 3, "draft": false},
+      {"number": 4, "draft": false},
+      {"number": 5, "draft": false},
+      {"number": 6, "draft": false},
+      {"number": 7, "draft": false}
+    ],
+    "repos/keithah/fixture/pulls/1": {"number": 1, "draft": false, "additions": 1, "deletions": 0, "labels": []},
+    "repos/keithah/fixture/pulls/2": {"number": 2, "draft": false, "additions": 51, "deletions": 0, "labels": []},
+    "repos/keithah/fixture/pulls/3": {"number": 3, "draft": false, "additions": 201, "deletions": 0, "labels": []},
+    "repos/keithah/fixture/pulls/4": {"number": 4, "draft": false, "additions": 501, "deletions": 0, "labels": []},
+    "repos/keithah/fixture/pulls/5": {"number": 5, "draft": false, "additions": 1, "deletions": 0, "labels": []},
+    "repos/keithah/fixture/pulls/6": {"number": 6, "draft": false, "additions": 2, "deletions": 0, "labels": []},
+    "repos/keithah/fixture/pulls/7": {"number": 7, "draft": false, "additions": 3, "deletions": 0, "labels": []}
+  }
+}

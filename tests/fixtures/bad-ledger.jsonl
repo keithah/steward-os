@@ -1,0 +1,21 @@
+{
+  "onboarded_repositories": ["keithah/a"],
+  "ledger": [
+    {
+      "action": "add_label",
+      "repository": "keithah/a",
+      "number": 1,
+      "label": "steward:size:S",
+      "changed_lines": 600,
+      "url": "https://github.com/keithah/a/pull/1",
+      "timestamp": "2026-09-03T00:00:00Z"
+    }
+  ],
+  "responses": {
+    "repos/keithah/a/pulls/1": {
+      "labels": [{"name": "steward:size:M"}],
+      "additions": 300,
+      "deletions": 300
+    }
+  }
+}
