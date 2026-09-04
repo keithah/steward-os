@@ -67,6 +67,7 @@ Patterns that span multiple areas.
 - [Anti-patterns](reference/anti-patterns.md) — the mistakes this system is designed to avoid.
 - [Security spine](reference/security-spine.md) — guardrail patterns in detail.
 - [Hermes PR review gate](reference/hermes-pr-review-gate.md) — local-only, exact-SHA evidence for review gates.
+- [Private Level 2/3 runtime](reference/private-runtime-levels.md) — optional deterministic scoreboard, guarded add-only labels, and a read-only watchdog.
 
 ## Skills
 Loadable agent procedures live in [`skills/`](../skills/) and are linked from the playbook section
