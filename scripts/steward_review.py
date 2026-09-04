@@ -129,7 +129,7 @@ def _builtin_state_root() -> Path:
     """Return the private root used by the zero-configuration baseline."""
     override = os.environ.get("STEWARD_STATE_ROOT")
     if override is None:
-        return (Path.home() / ".config" / "steward-os").resolve()
+        return (Path.home() / ".config" / "steward-os" / "runtime").resolve()
     root = Path(override)
     if not root.is_absolute():
         raise ReviewError("STEWARD_STATE_ROOT must be absolute")

@@ -19,7 +19,8 @@ Use this procedure only for a clean, committed branch. It creates local review e
 1. Confirm the target repository is clean and identify its committed `HEAD`. Do not stash, reset, commit, or otherwise mutate it to make it reviewable.
 2. Invoke the runner for that checkout. With no private configuration, it uses
    its safe built-in baseline: GitHub origin/local-default-branch discovery,
-   local evidence storage, the deep lane, and no configured commands:
+   private evidence storage under `~/.config/steward-os/runtime/`, the deep lane,
+   and no configured commands:
 
    ```sh
    python3 scripts/steward_review.py --repo-dir /path/to/repository

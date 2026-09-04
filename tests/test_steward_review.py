@@ -219,6 +219,28 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(manifest["config_source"], "builtin-default")
         self.assertEqual(state_root.stat().st_mode & 0o777, 0o700)
 
+    def test_builtin_default_uses_a_private_runtime_subdirectory(self):
+        """The fallback must not reuse the shared configuration directory itself."""
+        home = self.root / "home"
+        env = {**os.environ, "HOME": str(home)}
+        env.pop("STEWARD_STATE_ROOT", None)
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(self.runner),
+                "--repo-dir", str(self.repo),
+            ],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+        state_root = home / ".config" / "steward-os" / "runtime"
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(state_root.stat().st_mode & 0o777, 0o700)
+        self.assertTrue(list((state_root / "manifests").rglob("*.json")))
+
     def test_uses_builtin_default_when_config_directory_has_no_match(self):
         """An absent optional per-repository override falls back safely."""
         config_dir = self.root / "repositories"
