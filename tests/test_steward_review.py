@@ -240,6 +240,24 @@ class StewardReviewTests(unittest.TestCase):
         manifest = json.loads(Path(result.stdout.strip()).read_text())
         self.assertEqual(manifest["config_source"], "builtin-default")
 
+    def test_rejects_builtin_state_root_inside_reviewed_checkout(self):
+        """The environment override cannot make zero-config state repo-controlled."""
+        state_root = self.repo / "steward-state"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(self.runner),
+                "--repo-dir", str(self.repo),
+            ],
+            env={**os.environ, "STEWARD_STATE_ROOT": str(state_root)},
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("built-in state root must be outside reviewed checkout", result.stderr)
+        self.assertFalse(state_root.exists())
+
     def test_writes_exact_state_for_clean_repository(self):
         """Exercise the Steward review gate behavior."""
         result = self.run_runner()

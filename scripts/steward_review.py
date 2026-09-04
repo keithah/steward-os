@@ -489,6 +489,8 @@ def main() -> int:
         manifest = git_state(repo_dir, config["repository"]["base_ref"])
         if config_source == "builtin-default":
             state_root = _builtin_state_root()
+            if _is_inside(state_root, repo_dir):
+                raise ReviewError("built-in state root must be outside reviewed checkout")
             state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
             os.chmod(state_root, 0o700)
         manifest.update(
