@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 
-from steward_runtime.scoreboard import build_scoreboard, material_digest, rank_items, render_scoreboard
+from steward_runtime.scoreboard import _review_status, build_scoreboard, material_digest, rank_items, render_scoreboard
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -51,6 +51,43 @@ class ScoreboardRankingTests(unittest.TestCase):
         snapshot = {"top_keys": ["keithah/a#1"], "items": []}
 
         self.assertEqual(material_digest(snapshot, snapshot), "")
+
+    def test_latest_review_from_each_reviewer_supersedes_stale_change_request(self):
+        reviews = [
+            {
+                "state": "CHANGES_REQUESTED",
+                "submitted_at": "2026-09-01T12:00:00Z",
+                "user": {"login": "reviewer"},
+            },
+            {
+                "state": "APPROVED",
+                "submitted_at": "2026-09-02T12:00:00Z",
+                "user": {"login": "reviewer"},
+            },
+        ]
+
+        self.assertEqual(_review_status(reviews), "approved")
+
+    def test_dismissed_newer_review_preserves_reviewer_prior_active_state(self):
+        reviews = [
+            {
+                "state": "CHANGES_REQUESTED",
+                "submitted_at": "2026-09-01T12:00:00Z",
+                "user": {"login": "reviewer"},
+            },
+            {
+                "state": "APPROVED",
+                "submitted_at": "2026-09-02T12:00:00Z",
+                "user": {"login": "reviewer"},
+            },
+            {
+                "state": "DISMISSED",
+                "submitted_at": "2026-09-03T12:00:00Z",
+                "user": {"login": "reviewer"},
+            },
+        ]
+
+        self.assertEqual(_review_status(reviews), "changes_requested")
 
 
 class ScoreboardCollectionTests(unittest.TestCase):
