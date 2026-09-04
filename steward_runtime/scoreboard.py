@@ -35,6 +35,41 @@ def _all_open_items(client: GitHubClient, path: str) -> list[Mapping[str, object
         page += 1
 
 
+def _all_reviews(client: GitHubClient, path: str) -> list[Mapping[str, object]]:
+    """Collect every review page so later review states are not lost."""
+    reviews: list[Mapping[str, object]] = []
+    page = 1
+    while True:
+        params = {"per_page": "100"}
+        if page > 1:
+            params["page"] = str(page)
+        payload = client.get_json(path, params)
+        if not isinstance(payload, list):
+            return reviews
+        reviews.extend(_objects(payload))
+        if len(payload) < 100:
+            return reviews
+        page += 1
+
+
+def _all_check_runs(client: GitHubClient, path: str) -> dict[str, list[Mapping[str, object]]]:
+    """Collect every check-run page so a late failure remains visible."""
+    check_runs: list[Mapping[str, object]] = []
+    page = 1
+    while True:
+        params = {"per_page": "100"}
+        if page > 1:
+            params["page"] = str(page)
+        payload = client.get_json(path, params)
+        page_runs = payload.get("check_runs") if isinstance(payload, Mapping) else None
+        if not isinstance(page_runs, list):
+            return {"check_runs": check_runs}
+        check_runs.extend(_objects(page_runs))
+        if len(page_runs) < 100:
+            return {"check_runs": check_runs}
+        page += 1
+
+
 def _labels(value: object) -> list[str]:
     return sorted(
         str(label["name"])
@@ -113,10 +148,10 @@ def build_scoreboard(
                 continue
             head = pull.get("head")
             sha = head.get("sha") if isinstance(head, Mapping) else None
-            reviews = client.get_json(f"repos/{repository}/pulls/{number}/reviews")
+            reviews = _all_reviews(client, f"repos/{repository}/pulls/{number}/reviews")
             checks: object = None
             if isinstance(sha, str) and sha:
-                checks = client.get_json(f"repos/{repository}/commits/{sha}/check-runs")
+                checks = _all_check_runs(client, f"repos/{repository}/commits/{sha}/check-runs")
             key = f"{repository}#{number}"
             judgment = judgments.get(key)
             item: dict[str, object] = {

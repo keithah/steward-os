@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 
 from steward_runtime.github import GitHubClient
 from steward_runtime.labels import SIZE_LABELS, _exclusive_lock, _load_label_state, _repository_label_names, bootstrap_repository_labels
-from steward_runtime.state import RuntimePaths, atomic_write_json
+from steward_runtime.state import RuntimePaths, atomic_write_json, label_state_lock_path
 
 
 def frozen_scoreboard_repositories(path: Path) -> list[str]:
@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
         if not repositories:
             raise ValueError("repository selection must not be empty")
         client = GitHubClient()
-        with _exclusive_lock(paths.locks / "label-bootstrap.lock"):
+        with _exclusive_lock(label_state_lock_path(paths.label_state_json)):
             state = _load_label_state(paths.label_state_json)
             onboarded = set(state["onboarded_repositories"])
             for repository in repositories:

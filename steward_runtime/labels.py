@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol, TypeGuard, cast
 
-from steward_runtime.state import atomic_write_json
+from steward_runtime.state import atomic_write_json, label_state_lock_path
 
 SIZE_LABELS = (
     "steward:size:S",
@@ -192,6 +192,25 @@ def _complete_pending_action(
     return dict(entry)
 
 
+def _valid_pending_timestamp(value: object) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() is not None
+
+
+def _is_valid_pending_action(entry: Mapping[str, object], repository: str, number: int) -> bool:
+    return (
+        _is_pending_action_for_target(entry, repository, number)
+        and _is_nonnegative_integer(entry.get("changed_lines"))
+        and entry.get("url") == f"https://github.com/{repository}/pull/{number}"
+        and _valid_pending_timestamp(entry.get("timestamp"))
+    )
+
+
 def _is_pending_action_for_target(entry: Mapping[str, object], repository: str, number: int) -> bool:
     label = entry.get("label")
     return (
@@ -214,7 +233,7 @@ def sync_labels(
     if limit is not None and limit < 0:
         raise ValueError("limit must be non-negative")
     state_path = ledger_path.with_name("label-state.json")
-    lock_path = ledger_path.parent / "locks" / "label-sync.lock"
+    lock_path = label_state_lock_path(state_path)
     actions: list[dict[str, object]] = []
     lock = _exclusive_lock(lock_path) if apply else nullcontext()
     with lock:
@@ -241,6 +260,8 @@ def sync_labels(
                     continue
                 pending_entry = pending.get(key)
                 if isinstance(pending_entry, Mapping):
+                    if not _is_valid_pending_action(pending_entry, repository, number):
+                        raise ValueError(f"invalid pending label action for {key}; manual reconciliation required")
                     label = pending_entry.get("label")
                     labels = _label_names(detail.get("labels"))
                     if isinstance(label, str) and label in labels:

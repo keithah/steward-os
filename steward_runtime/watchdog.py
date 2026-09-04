@@ -123,6 +123,9 @@ def verify_ledger_entry(
     if labels is None or not isinstance(additions, int) or isinstance(additions, bool) or not isinstance(deletions, int) or isinstance(deletions, bool):
         findings.append(_finding(entry, "source mismatch: live PR lacks structured labels or totals"))
         return findings
+    if additions < 0 or deletions < 0:
+        findings.append(_finding(entry, "source mismatch: live totals must be non-negative"))
+        return findings
     if isinstance(label, str) and label not in labels:
         findings.append(_finding(entry, f"missing label {label!r} on live PR"))
     if isinstance(changed_lines, int) and not isinstance(changed_lines, bool) and additions + deletions != changed_lines:

@@ -94,6 +94,13 @@ class WatchdogTests(unittest.TestCase):
         self.assertTrue(any("not onboarded" in reason for reason in reasons))
         self.assertEqual(client.reads, [("repos/keithah/a/pulls/1", None)])
 
+    def test_negative_live_total_is_a_red_finding_even_when_sum_matches_ledger(self):
+        client = FakeReadOnlyClient({"repos/keithah/a/pulls/1": clean_detail(additions=-1, deletions=101)})
+
+        findings = verify_ledger_entry(clean_entry(changed_lines=100), client, {"keithah/a"})
+
+        self.assertTrue(any("live totals must be non-negative" in finding["reason"] for finding in findings))
+
     def test_detects_label_missing_and_live_total_mismatch(self):
         client = FakeReadOnlyClient(
             {"repos/keithah/a/pulls/1": clean_detail(labels=[], additions=90, deletions=20)}

@@ -143,6 +143,36 @@ class ScoreboardCollectionTests(unittest.TestCase):
         self.assertEqual(snapshot["items"][0]["judgment"], {"severity": "critical", "note": "human judgment"})
         self.assertEqual(client.calls[0], ("repos/keithah/live/pulls", {"state": "open", "per_page": "100"}))
 
+    def test_uses_later_review_and_check_pages_for_status_and_priority(self):
+        repository = "keithah/paginated-signals"
+        first_reviews = [{"state": "COMMENTED"} for _ in range(100)]
+        first_checks = [{"status": "completed", "conclusion": "success"} for _ in range(100)]
+        client = FakeGitHubClient(
+            {
+                f"repos/{repository}/pulls": [
+                    {"number": 1, "head": {"sha": "first"}},
+                    {"number": 2, "head": {"sha": "second"}},
+                ],
+                f"repos/{repository}/pulls/1": {"number": 1, "mergeable_state": "clean", "labels": []},
+                f"repos/{repository}/pulls/2": {"number": 2, "mergeable_state": "clean", "labels": []},
+                f"repos/{repository}/pulls/1/reviews": [],
+                f"repos/{repository}/pulls/2/reviews": first_reviews,
+                (f"repos/{repository}/pulls/2/reviews", "2"): [{"state": "CHANGES_REQUESTED"}],
+                f"repos/{repository}/commits/first/check-runs": {"check_runs": [{"status": "completed", "conclusion": "success"}]},
+                f"repos/{repository}/commits/second/check-runs": {"check_runs": first_checks},
+                (f"repos/{repository}/commits/second/check-runs", "2"): {"check_runs": [{"status": "completed", "conclusion": "failure"}]},
+                f"repos/{repository}/issues": [],
+            }
+        )
+
+        snapshot = build_scoreboard([repository], client, {}, NOW)
+
+        self.assertEqual([item["key"] for item in snapshot["items"]], [f"{repository}#2", f"{repository}#1"])
+        self.assertEqual(snapshot["items"][0]["ci"], "failure")
+        self.assertEqual(snapshot["items"][0]["review"], "changes_requested")
+        self.assertIn((f"repos/{repository}/pulls/2/reviews", {"per_page": "100", "page": "2"}), client.calls)
+        self.assertIn((f"repos/{repository}/commits/second/check-runs", {"per_page": "100", "page": "2"}), client.calls)
+
     def test_collects_and_ranks_open_issues_from_page_two(self):
         issue_path = "repos/keithah/paginated/issues"
         first_page = [
@@ -215,6 +245,11 @@ class ScoreboardCollectionTests(unittest.TestCase):
 
 
 class ScoreboardScriptTests(unittest.TestCase):
+    def test_parse_time_normalizes_a_naive_now_to_utc(self):
+        parsed = load_scoreboard_module().parse_time("2026-09-03T12:00:00")
+
+        self.assertEqual(parsed, datetime(2026, 9, 3, 12, tzinfo=timezone.utc))
+
     def test_fixture_run_writes_private_artifacts_then_is_silent_when_unchanged(self):
         fixture = {
             "repositories": ["keithah/live"],

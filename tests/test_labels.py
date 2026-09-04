@@ -154,6 +154,47 @@ class SyncTests(unittest.TestCase):
                     self.assertFalse(ledger_path.exists())
                     self.assertEqual(json.loads(state_path.read_text(encoding="utf-8")), original)
 
+    def test_sync_fails_closed_for_visible_pending_record_without_valid_timestamp(self):
+        class Client:
+            def get_json(self, path, params=None):
+                if path == "repos/keithah/onboarded/pulls":
+                    return [{"number": 8, "draft": False}]
+                if path == "repos/keithah/onboarded/pulls/8":
+                    return {"number": 8, "draft": False, "additions": 1, "deletions": 0, "labels": [{"name": "steward:size:S"}]}
+                raise AssertionError(f"unexpected read {path}")
+
+            def add_label(self, repository, number, label):
+                raise AssertionError("must not write after invalid pending state")
+
+            def create_label(self, repository, label):
+                raise AssertionError("sync must not create repository labels")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            state_path = root / "label-state.json"
+            original = {
+                "onboarded_repositories": ["keithah/onboarded"],
+                "processed": {},
+                "pending": {
+                    "keithah/onboarded#8": {
+                        "action": "add_label",
+                        "repository": "keithah/onboarded",
+                        "number": 8,
+                        "label": "steward:size:S",
+                        "changed_lines": 1,
+                        "url": "https://github.com/keithah/onboarded/pull/8",
+                    }
+                },
+            }
+            state_path.write_text(json.dumps(original), encoding="utf-8")
+            ledger_path = root / "label-ledger.jsonl"
+
+            with self.assertRaisesRegex(ValueError, "invalid pending label action"):
+                sync_labels(["keithah/onboarded"], Client(), ledger_path)
+
+            self.assertFalse(ledger_path.exists())
+            self.assertEqual(json.loads(state_path.read_text(encoding="utf-8")), original)
+
     def test_sync_rejects_malformed_totals_before_recovering_a_visible_pending_label(self):
         class Client:
             def __init__(self, additions, deletions):

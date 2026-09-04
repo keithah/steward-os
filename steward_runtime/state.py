@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import tempfile
@@ -37,6 +38,31 @@ class RuntimePaths:
         )
 
 
+def label_state_lock_path(state_path: Path) -> Path:
+    """Return the lock shared by every whole-document label-state writer."""
+    return state_path.parent / "locks" / "label-state.lock"
+
+
+def _fsync_parent_directory(parent: Path) -> None:
+    """Durably record a replacement in *parent* when directory fsync exists."""
+    unsupported = {errno.EINVAL, errno.ENOTSUP, getattr(errno, "EOPNOTSUPP", errno.ENOTSUP)}
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    try:
+        descriptor = os.open(parent, flags)
+    except OSError as error:
+        if error.errno in unsupported:
+            return
+        raise
+    try:
+        try:
+            os.fsync(descriptor)
+        except OSError as error:
+            if error.errno not in unsupported:
+                raise
+    finally:
+        os.close(descriptor)
+
+
 def atomic_write_json(path: Path, value: object) -> None:
     """Atomically replace *path* with a JSON document."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -49,3 +75,4 @@ def atomic_write_json(path: Path, value: object) -> None:
         os.fsync(temporary.fileno())
         temporary_path = Path(temporary.name)
     os.replace(temporary_path, path)
+    _fsync_parent_directory(path.parent)

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from steward_runtime.github import GitHubClient
 from steward_runtime.inventory import is_active_repository, select_active_repositories
-from steward_runtime.state import RuntimePaths, atomic_write_json
+from steward_runtime.state import RuntimePaths, _fsync_parent_directory, atomic_write_json, label_state_lock_path
 
 
 class RuntimeStateTests(unittest.TestCase):
@@ -26,6 +26,26 @@ class RuntimeStateTests(unittest.TestCase):
         self.assertEqual(paths.label_state_json, expected_root / "label-state.json")
         self.assertEqual(paths.watchdog_state_json, expected_root / "watchdog-state.json")
         self.assertEqual(paths.locks, expected_root / "locks")
+
+    def test_label_state_lock_path_serializes_all_label_state_writers(self):
+        root = pathlib.Path("/private/steward-runtime")
+
+        self.assertEqual(
+            label_state_lock_path(root / "label-state.json"),
+            root / "locks" / "label-state.lock",
+        )
+
+    def test_atomic_write_json_syncs_parent_directory_after_replace(self):
+        parent = pathlib.Path("/private/steward-runtime")
+        with patch("steward_runtime.state.os.open", return_value=91) as open_directory, patch(
+            "steward_runtime.state.os.close"
+        ) as close_directory, patch("steward_runtime.state.os.fsync") as fsync:
+            _fsync_parent_directory(parent)
+
+        fsync.assert_called_once_with(91)
+        open_directory.assert_called_once()
+        self.assertEqual(open_directory.call_args.args[0], parent)
+        close_directory.assert_called_once_with(91)
 
     def test_atomic_write_json_creates_parent_and_replaces_json(self):
         with tempfile.TemporaryDirectory() as directory:
