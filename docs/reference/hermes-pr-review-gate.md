@@ -10,10 +10,10 @@ The Hermes PR review gate produces local-only, exact-SHA review evidence before 
 
 ## Install the public procedure
 
-Keep this repository public-safe. Store live configuration, manifests, reports, credentials, repository inventories, and host-specific paths outside the reviewed checkout and outside this repository. Configuration is optional: the runner has a safe built-in baseline for zero-setup use.
+Keep this repository public-safe. Store live configuration, manifests, reports, credentials, repository inventories, and host-specific paths outside the reviewed checkout and outside this repository. Configuration is optional: the runner has a safe built-in baseline for zero-setup use; its default evidence root is `~/.config/steward-os/runtime/`.
 
 1. Make the runner available from a trusted checkout of this repository.
-2. Run it against a clean GitHub checkout. With no private configuration it discovers the local default branch, records evidence under `~/.config/steward-os/`, uses the deep lane, and runs no commands from the checkout.
+2. Run it against a clean GitHub checkout. With no private configuration it discovers the local default branch, records evidence under `~/.config/steward-os/runtime/`, uses the deep lane, and runs no commands from the checkout.
 3. Optionally copy [`setup/hermes-review-config.example.json`](../../setup/hermes-review-config.example.json) to a private configuration directory when you need custom state roots, lane patterns, or trusted deterministic checks. Do not put secrets, tokens, hostnames, or live local paths in public files.
 4. Load [`skills/hermes-pr-review/SKILL.md`](../../skills/hermes-pr-review/SKILL.md) in Hermes for the review procedure.
 
