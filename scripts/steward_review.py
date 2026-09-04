@@ -127,9 +127,34 @@ def _default_base_ref(repo_dir: Path) -> str:
 
 def _builtin_state_root() -> Path:
     """Return the private root used by the zero-configuration baseline."""
-    return Path(
-        os.environ.get("STEWARD_STATE_ROOT", Path.home() / ".config" / "steward-os")
-    ).resolve()
+    override = os.environ.get("STEWARD_STATE_ROOT")
+    if override is None:
+        return (Path.home() / ".config" / "steward-os").resolve()
+    root = Path(override)
+    if not root.is_absolute():
+        raise ReviewError("STEWARD_STATE_ROOT must be absolute")
+    return root.resolve()
+
+
+def _prepare_builtin_state_root(repo_dir: Path) -> Path:
+    """Create a private baseline root without altering any existing directory."""
+    state_root = _builtin_state_root()
+    if _is_inside(state_root, repo_dir):
+        raise ReviewError("built-in state root must be outside reviewed checkout")
+    try:
+        info = state_root.stat()
+    except FileNotFoundError:
+        try:
+            state_root.mkdir(parents=True, mode=0o700)
+        except FileExistsError:
+            return _prepare_builtin_state_root(repo_dir)
+        os.chmod(state_root, 0o700)
+        return state_root
+    if not state_root.is_dir():
+        raise ReviewError("built-in state root must be a directory")
+    if info.st_mode & 0o077:
+        raise ReviewError("existing built-in state root must be private")
+    return state_root
 
 
 def builtin_config(repo_dir: Path) -> dict:
@@ -488,11 +513,7 @@ def main() -> int:
             config_source = "private-override"
         manifest = git_state(repo_dir, config["repository"]["base_ref"])
         if config_source == "builtin-default":
-            state_root = _builtin_state_root()
-            if _is_inside(state_root, repo_dir):
-                raise ReviewError("built-in state root must be outside reviewed checkout")
-            state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-            os.chmod(state_root, 0o700)
+            _prepare_builtin_state_root(repo_dir)
         manifest.update(
             {
                 "base_ref": config["repository"]["base_ref"],

@@ -258,6 +258,65 @@ class StewardReviewTests(unittest.TestCase):
         self.assertIn("built-in state root must be outside reviewed checkout", result.stderr)
         self.assertFalse(state_root.exists())
 
+    def test_rejects_relative_builtin_state_root(self):
+        """A relative environment override cannot depend on the runner cwd."""
+        working_directory = self.root / "non-target-cwd"
+        working_directory.mkdir()
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(self.runner),
+                "--repo-dir", str(self.repo),
+            ],
+            cwd=working_directory,
+            env={**os.environ, "STEWARD_STATE_ROOT": "relative-state"},
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("STEWARD_STATE_ROOT must be absolute", result.stderr)
+        self.assertFalse((working_directory / "relative-state").exists())
+
+    def test_rejects_existing_file_as_builtin_state_root(self):
+        """Zero-config setup fails cleanly instead of surfacing FileExistsError."""
+        state_root = self.root / "state-file"
+        state_root.write_text("do not modify\n")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(self.runner),
+                "--repo-dir", str(self.repo),
+            ],
+            env={**os.environ, "STEWARD_STATE_ROOT": str(state_root)},
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("built-in state root must be a directory", result.stderr)
+        self.assertEqual(state_root.read_text(), "do not modify\n")
+
+    def test_rejects_existing_non_private_builtin_state_root_without_chmod(self):
+        """Existing directories are never permission-mutated by the runner."""
+        state_root = self.root / "existing-state"
+        state_root.mkdir(mode=0o755)
+        state_root.chmod(0o755)
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(self.runner),
+                "--repo-dir", str(self.repo),
+            ],
+            env={**os.environ, "STEWARD_STATE_ROOT": str(state_root)},
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("existing built-in state root must be private", result.stderr)
+        self.assertEqual(state_root.stat().st_mode & 0o777, 0o755)
+
     def test_writes_exact_state_for_clean_repository(self):
         """Exercise the Steward review gate behavior."""
         result = self.run_runner()
