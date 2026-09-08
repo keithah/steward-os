@@ -50,9 +50,15 @@ class StewardLlmReviewTests(unittest.TestCase):
             from pathlib import Path
 
             args = sys.argv[1:]
-            prompt = args[args.index("--oneshot") + 1]
+            query_path = Path(args[args.index("--query-file") + 1])
+            prompt = query_path.read_text()
             with Path(os.environ["FAKE_HERMES_LOG"]).open("a") as log:
-                log.write(json.dumps({"args": args, "cwd": os.getcwd(), "prompt": prompt}) + "\\n")
+                log.write(json.dumps({
+                    "args": args,
+                    "cwd": os.getcwd(),
+                    "prompt": prompt,
+                    "query_mode": query_path.stat().st_mode & 0o777,
+                }) + "\\n")
             role = "primary" if '"role": "primary"' in prompt else "adversarial"
             behavior = os.environ["FAKE_HERMES_BEHAVIOR"]
             if behavior == "reviewer-fails" and role == "primary":
@@ -305,8 +311,14 @@ class StewardLlmReviewTests(unittest.TestCase):
         invocations = [json.loads(line) for line in self.hermes_log.read_text().splitlines()]
         self.assertEqual(len(invocations), 2)
         for invocation in invocations:
-            for argument in ("--safe-mode", "--toolsets", ",", "--max-turns", "1"):
-                self.assertIn(argument, invocation["args"])
+            args = invocation["args"]
+            for argument in (
+                "chat", "--safe-mode", "--toolsets", ",", "--max-turns", "1",
+                "--quiet", "--oneshot", "--query-file",
+            ):
+                self.assertIn(argument, args)
+            self.assertNotIn("feature.txt", " ".join(args))
+            self.assertEqual(invocation["query_mode"], 0o600)
             self.assertNotEqual(Path(invocation["cwd"]).resolve(), self.repo.resolve())
             self.assertIn('"diff"', invocation["prompt"])
             self.assertIn("feature.txt", invocation["prompt"])

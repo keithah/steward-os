@@ -226,6 +226,7 @@ def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> d
         os.chmod(prompt_path, 0o600)
         command = [
             hermes_bin,
+            "chat",
             "--safe-mode",
             "--toolsets",
             ",",
@@ -237,8 +238,10 @@ def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> d
             reviewer["model"],
             "--reasoning",
             "high",
+            "--quiet",
             "--oneshot",
-            prompt_path.read_text(),
+            "--query-file",
+            str(prompt_path),
         ]
         completed = subprocess.run(
             command,
