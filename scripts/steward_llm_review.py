@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,7 @@ class ReviewError(Exception):
 _ROLES = ("primary", "adversarial")
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_MAX_PROMPT_DIFF_BYTES = 256 * 1024
 _ARTIFACT_KEYS = {
     "repository",
     "head_sha",
@@ -124,16 +126,65 @@ def _prompt(role: str, context: dict) -> str:
         )
     }
     bindings["role"] = role
-    return (
-        "Perform a read-only review using the supplied repository state. "
-        "do not execute reviewed code or repository tests. Make no GitHub writes and do not "
-        "create, alter, or delete any GitHub object. Do not invoke network write APIs. "
-        "Emit exactly one JSON object and no markdown or prose. Its exact keys must be: "
-        "repository, head_sha, base_sha, merge_base_sha, config_revision, role, provider, "
-        "model, status, findings, probes, limitations. The provider and model must be the "
-        "requested values. Bind the object to this context:\n"
-        + json.dumps(bindings, sort_keys=True)
+    return json.dumps(
+        {
+            "instructions": (
+                "Perform a read-only review using the supplied committed diff only. Do not "
+                "execute reviewed code or repository tests. Make no GitHub writes and do not "
+                "create, alter, or delete any GitHub object. Do not invoke network write APIs. "
+                "Emit exactly one JSON object and no markdown or prose. Its exact keys must be: "
+                "repository, head_sha, base_sha, merge_base_sha, config_revision, role, provider, "
+                "model, status, findings, probes, limitations. The provider and model must be the "
+                "requested values. Bind the object to the supplied bindings."
+            ),
+            "bindings": bindings,
+            "diff": context["diff"],
+        },
+        sort_keys=True,
     )
+
+
+def committed_diff(context: dict) -> str:
+    try:
+        completed = subprocess.run(
+            [
+                "git",
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--unified=80",
+                f"{context['base_sha']}...{context['head_sha']}",
+            ],
+            cwd=context["repo_dir"],
+            text=True,
+            capture_output=True,
+        )
+    except OSError as error:
+        raise ReviewError(f"cannot generate committed diff: {error}") from error
+    if completed.returncode:
+        raise ReviewError("cannot generate committed diff")
+    if len(completed.stdout.encode("utf-8")) > _MAX_PROMPT_DIFF_BYTES:
+        raise ReviewError("diff exceeds prompt limit")
+    return completed.stdout
+
+
+def ensure_private_report_root(report_root: Path) -> None:
+    try:
+        report_root.mkdir(mode=0o700)
+    except FileExistsError:
+        pass
+    except OSError as error:
+        raise ReviewError(f"cannot create report_root: {error}") from error
+    try:
+        root_stat = report_root.stat()
+    except OSError as error:
+        raise ReviewError(f"cannot inspect report_root: {error}") from error
+    if (
+        not stat.S_ISDIR(root_stat.st_mode)
+        or root_stat.st_uid != os.getuid()
+        or stat.S_IMODE(root_stat.st_mode) & 0o077
+    ):
+        raise ReviewError("report_root must be owner-private")
 
 
 def parse_only_json(output: str, role: str) -> dict:
@@ -175,21 +226,23 @@ def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> d
         os.chmod(prompt_path, 0o600)
         command = [
             hermes_bin,
-            "--ignore-user-config",
-            "chat",
-            "--oneshot",
+            "--safe-mode",
+            "--toolsets",
+            ",",
+            "--max-turns",
+            "1",
             "--provider",
             reviewer["provider"],
             "--model",
             reviewer["model"],
             "--reasoning",
             "high",
-            "--query-file",
-            str(prompt_path),
+            "--oneshot",
+            prompt_path.read_text(),
         ]
         completed = subprocess.run(
             command,
-            cwd=context["repo_dir"],
+            cwd=prompt_dir,
             text=True,
             capture_output=True,
         )
@@ -229,6 +282,7 @@ def persist_artifacts(context: dict, artifacts: dict) -> list[Path]:
             temporary_path = Path(temporary_name)
             temporary_paths.append(temporary_path)
             with os.fdopen(descriptor, "w") as temporary_file:
+                os.fchmod(descriptor, 0o600)
                 json.dump(artifacts[role], temporary_file, sort_keys=True)
                 temporary_file.write("\n")
             temporary_path.replace(destination)
@@ -251,6 +305,8 @@ def main() -> int:
         if not repo_dir.is_dir():
             raise ReviewError("repo-dir must be a directory")
         context = load_context(repo_dir, args.manifest.resolve())
+        ensure_private_report_root(context["report_root"])
+        context["diff"] = committed_diff(context)
         artifacts = {
             role: run_reviewer(role, context["reviewers"][role], context, args.hermes_bin)
             for role in _ROLES
