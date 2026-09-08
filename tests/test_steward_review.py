@@ -655,10 +655,15 @@ class StewardReviewTests(unittest.TestCase):
             "no fallback acceptance",
             "no GitHub writes or reviewed-code execution",
             "future sandbox",
-            "--safe-mode",
-            "--toolsets none",
             "isolation remediation is pending",
         ]
+        reference_required.extend([
+            "--safe-mode",
+            "--toolsets ,",
+            "--max-turns 1",
+            "empty toolset list",
+        ])
+        self.assertNotIn("--toolsets none", reference_content)
         for value in skill_required:
             with self.subTest(location="skill", value=value):
                 self.assertIn(value, skill_content)
