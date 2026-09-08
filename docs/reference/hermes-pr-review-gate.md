@@ -74,7 +74,7 @@ The manifest is local-only JSON at:
 <manifest_root>/<owner>__<repo>/branch-<sanitized-branch>/<head_sha>.json
 ```
 
-It records the exact repository, branch, base ref, base SHA, merge-base SHA, head SHA, `config_revision`, selected lane, changed paths, command results, skipped checks, and status. Command output is bounded and records whether it was truncated.
+It records the exact repository, branch, base ref, base SHA, merge-base SHA, head SHA, `config_revision`, selected lane, changed paths, command results, skipped checks, and status. Command output is bounded and records whether it was truncated. For a clean detached-HEAD checkout, the runner records `branch` as exactly `""`; a ready manifest binds reviewer prompts and private artifact paths to its validated `head_sha` instead. Nonempty branch values remain the branch binding, and whitespace-only branches remain invalid.
 
 ## Lane behavior and Hermes review
 

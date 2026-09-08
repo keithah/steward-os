@@ -128,7 +128,9 @@ def load_context(repo_dir: Path, manifest_path: Path) -> dict:
     repository = _require_string(manifest.get("repository"), "repository")
     if not re.fullmatch(r"[^/\s]+/[^/\s]+", repository):
         raise ReviewError("repository invalid")
-    branch = _require_string(manifest.get("branch"), "branch")
+    head_sha = _require_hash(manifest.get("head_sha"), "head_sha", _SHA_PATTERN)
+    branch_value = manifest.get("branch")
+    branch = head_sha if branch_value == "" else _require_string(branch_value, "branch")
     report_root_value = manifest.get("report_root")
     if report_root_value is None:
         raise ReviewError("report_root missing")
@@ -153,7 +155,7 @@ def load_context(repo_dir: Path, manifest_path: Path) -> dict:
         "repo_dir": repo_dir,
         "repository": repository,
         "branch": branch,
-        "head_sha": _require_hash(manifest.get("head_sha"), "head_sha", _SHA_PATTERN),
+        "head_sha": head_sha,
         "base_sha": _require_hash(manifest.get("base_sha"), "base_sha", _SHA_PATTERN),
         "merge_base_sha": _require_hash(
             manifest.get("merge_base_sha"), "merge_base_sha", _SHA_PATTERN

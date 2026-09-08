@@ -252,6 +252,29 @@ class StewardLlmReviewTests(unittest.TestCase):
             {"primary.json", "adversarial.json"},
         )
 
+    def test_accepts_ready_detached_head_manifest_with_head_sha_branch_segment(self):
+        """An exactly empty branch binds detached-head reviewer state to the validated SHA."""
+        self.manifest["branch"] = ""
+        self.write_manifest()
+
+        result = self.run_orchestrator()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        destination = (
+            self.report_root
+            / "acme__widget"
+            / f"branch-{self.head_sha}"
+            / self.head_sha
+        )
+        self.assertEqual(
+            {path.name for path in destination.glob("*.json")},
+            {"primary.json", "adversarial.json"},
+        )
+        invocations = [json.loads(line) for line in self.hermes_log.read_text().splitlines()]
+        self.assertEqual(len(invocations), 2)
+        for invocation in invocations:
+            self.assertIn(f'"branch": "{self.head_sha}"', invocation["prompt"])
+
     def test_requires_both_primary_and_adversarial_artifacts(self):
         result = self.run_orchestrator("writes-valid-primary-only")
 
