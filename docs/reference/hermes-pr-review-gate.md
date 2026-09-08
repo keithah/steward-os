@@ -10,7 +10,7 @@ The Hermes PR review gate produces local-only, exact-SHA review evidence before 
 
 ## Install the public procedure
 
-Keep this repository public-safe. Store live configuration, manifests, reports, credentials, repository inventories, and host-specific paths outside the reviewed checkout and outside this repository. Configuration is optional: the runner has a safe built-in baseline for zero-setup use; its default evidence root is `~/.config/steward-os/runtime/`.
+Keep this repository public-safe. Store live configuration, manifests, reports, credentials, repository inventories, and host-specific paths outside the reviewed checkout and outside this repository. Configuration is optional only for **local diagnostic evidence**: a built-in configuration deliberately produces a blocked manifest, because it cannot establish project-specific quality evidence. Its default evidence root is `~/.config/steward-os/runtime/`.
 
 1. Make the runner available from a trusted checkout of this repository.
 2. Run it against a clean GitHub checkout. With no private configuration it discovers the local default branch, records evidence under `~/.config/steward-os/runtime/`, uses the deep lane, and runs no commands from the checkout.
@@ -60,7 +60,7 @@ From the public runner checkout, invoke the runner with a clean target repositor
 python3 scripts/steward_review.py --repo-dir /path/to/repository
 ```
 
-To override the baseline, add `--config /private/steward-os/repositories/owner__repository.json` or `--config-dir /private/steward-os/repositories`. The runner refuses a dirty checkout, invalid optional configuration, a mismatched origin/config identity, state roots inside the checkout, a post-command Git-state change, or failed eligible command. Each eligible host command is bounded by `command_timeout_seconds`; a timeout is recorded as failed and produces a `blocked` manifest. It writes a manifest only after valid Git/configuration state is resolved.
+To override the baseline, add `--config /private/steward-os/repositories/owner__repository.json` or `--config-dir /private/steward-os/repositories`. The runner refuses a dirty checkout, invalid optional configuration, a mismatched origin/config identity, state roots inside the checkout, a post-command Git-state change, failed eligible commands, **or any skipped/missing project quality evidence**. Each eligible host command is bounded by `command_timeout_seconds`; a timeout is recorded as failed and produces a `blocked` manifest. It writes a manifest only after valid Git/configuration state is resolved.
 
 The manifest is local-only JSON at:
 

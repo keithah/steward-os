@@ -125,7 +125,17 @@ that matters — not the incidental surface. (See
 
 ---
 
-## 7. The flake that's actually a bug
+## 8. Moving offset-pagination snapshot
+
+**Shape:** A reader fetches page zero with an advertised total, then trusts a later page that reports a different total. Concurrent insertion, deletion, or reordering can shift offsets, so the aggregate can skip or duplicate records while still looking complete.
+
+**Why checks miss it:** Ordinary fixtures hold the collection still and use the same total on every page. Checking only that a later total does not decrease incorrectly treats a growing total as progress.
+
+**Catch it:** Require a stable snapshot boundary: an immutable cursor/version when the API offers one, otherwise exactly the first advertised total for the entire read. Exercise later-page total changes in **both directions** (`2 → 3` and `3 → 2`) and assert the reader fails before it publishes aggregate output. A maintenance/report command must emit no partial rows after that prerequisite fails.
+
+---
+
+## 9. The flake that's actually a bug
 
 **Shape:** A test fails intermittently. The tempting read is "flaky, just re-run." Often it's a real
 race condition, ordering dependency, or resource bug in the *product* — the test is the only thing

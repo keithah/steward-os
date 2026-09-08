@@ -134,7 +134,7 @@ class StewardReviewTests(unittest.TestCase):
             capture_output=True,
         )
 
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(json.loads(next(self.manifest_root.rglob("*.json")).read_text())["repository"], "acme/widget")
 
     def test_accepts_github_origin_without_dot_git_suffix(self):
@@ -143,7 +143,7 @@ class StewardReviewTests(unittest.TestCase):
 
         result = self.run_runner()
 
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(self.read_manifest()["repository"], "acme/widget")
 
     def test_rejects_configuration_inside_the_reviewed_checkout(self):
@@ -194,8 +194,8 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(conflicting.returncode, 2)
         self.assertIn("not allowed with argument", conflicting.stderr)
 
-    def test_uses_builtin_default_when_no_private_config_exists(self):
-        """A clean GitHub checkout can receive local-only evidence without setup."""
+    def test_blocks_builtin_default_without_project_quality_evidence(self):
+        """No-config evidence cannot be mistaken for a complete PR gate."""
         state_root = self.root / "default-state"
         result = subprocess.run(
             [
@@ -208,7 +208,7 @@ class StewardReviewTests(unittest.TestCase):
             capture_output=True,
         )
 
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stderr)
         manifest_path = Path(result.stdout.strip())
         self.assertTrue(manifest_path.is_file())
         manifest = json.loads(manifest_path.read_text())
@@ -217,6 +217,8 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(manifest["lane"], "deep")
         self.assertEqual(manifest["commands"], [])
         self.assertEqual(manifest["config_source"], "builtin-default")
+        self.assertEqual(manifest["status"], "blocked")
+        self.assertEqual(manifest["evidence_gaps"], ["no repository-specific review configuration"])
         self.assertEqual(state_root.stat().st_mode & 0o777, 0o700)
 
     def test_builtin_default_uses_a_private_runtime_subdirectory(self):
@@ -237,7 +239,7 @@ class StewardReviewTests(unittest.TestCase):
         )
 
         state_root = home / ".config" / "steward-os" / "runtime"
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(state_root.stat().st_mode & 0o777, 0o700)
         self.assertTrue(list((state_root / "manifests").rglob("*.json")))
 
@@ -258,9 +260,10 @@ class StewardReviewTests(unittest.TestCase):
             capture_output=True,
         )
 
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stderr)
         manifest = json.loads(Path(result.stdout.strip()).read_text())
         self.assertEqual(manifest["config_source"], "builtin-default")
+        self.assertEqual(manifest["status"], "blocked")
 
     def test_rejects_builtin_state_root_inside_reviewed_checkout(self):
         """The environment override cannot make zero-config state repo-controlled."""
@@ -339,10 +342,10 @@ class StewardReviewTests(unittest.TestCase):
         self.assertIn("existing built-in state root must be private", result.stderr)
         self.assertEqual(state_root.stat().st_mode & 0o777, 0o755)
 
-    def test_writes_exact_state_for_clean_repository(self):
-        """Exercise the Steward review gate behavior."""
+    def test_blocks_skipped_project_quality_checks(self):
+        """Configured but unexecuted checks leave the gate incomplete."""
         result = self.run_runner()
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stderr)
         manifest = self.read_manifest()
         self.assertEqual(manifest["repository"], "acme/widget")
         self.assertEqual(manifest["base_ref"], "main")
@@ -365,7 +368,8 @@ class StewardReviewTests(unittest.TestCase):
             manifest["skipped_checks"],
             [{"id": "test", "reason": "disabled by configuration"}],
         )
-        self.assertEqual(manifest["status"], "ready")
+        self.assertEqual(manifest["status"], "blocked")
+        self.assertEqual(manifest["evidence_gaps"], ["test: disabled by configuration"])
         self.assertEqual(
             self.manifest_root
             / "acme__widget"
@@ -406,7 +410,7 @@ class StewardReviewTests(unittest.TestCase):
         self.write_config()
 
         result = self.run_runner()
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stderr)
         manifest = self.read_manifest()
         self.assertEqual(manifest["lane"], "visual")
         self.assertEqual([item["id"] for item in manifest["commands"]], ["format"])
@@ -414,6 +418,11 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(manifest["skipped_checks"], [
             {"id": "sandboxed", "reason": "sandbox execution unavailable"},
             {"id": "disabled", "reason": "disabled by configuration"},
+        ])
+        self.assertEqual(manifest["status"], "blocked")
+        self.assertEqual(manifest["evidence_gaps"], [
+            "sandboxed: sandbox execution unavailable",
+            "disabled: disabled by configuration",
         ])
 
     def test_rejects_sandbox_commands_until_a_runtime_is_integrated(self):

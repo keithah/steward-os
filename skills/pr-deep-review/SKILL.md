@@ -23,6 +23,9 @@ description: Deep-review a routed PR and run the authoritative quality gate befo
    - **automated code review** pass
    - **adversarial review** pass (a second, differently-tuned reviewer; stricter wins on a
      reproduced finding)
+   - **pagination snapshot audit** whenever changed code aggregates externally paged data: identify the
+     snapshot contract (immutable cursor/version or stable advertised total), then exercise a later-page
+     total/count change in both directions; a report must fail closed rather than silently aggregate it
    - **visual verification** for any visible surface (screenshots at config'd viewports; *drive*
      interactions, don't just screenshot them)
 4. **If the gate finds something:** Builder fixes it, gate **re-runs**. Loop until all-clear.
