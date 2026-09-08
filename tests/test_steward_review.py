@@ -737,6 +737,26 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(manifest["report_root"], str(self.report_root.resolve()))
 
+    def test_rejects_existing_nonprivate_custom_state_roots_before_writing_manifest(self):
+        """Private overrides never write evidence into public existing directories."""
+        for root_name in ("report_root", "manifest_root"):
+            with self.subTest(root_name=root_name):
+                root = self.root / f"public-{root_name}"
+                root.mkdir(mode=0o755)
+                root.chmod(0o755)
+                self.config["paths"][root_name] = str(root)
+                self.write_config()
+
+                result = self.run_runner()
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"{root_name} must be owner-private", result.stderr)
+                self.assertEqual(root.stat().st_mode & 0o777, 0o755)
+                self.assertFalse(list(self.manifest_root.rglob("*.json")))
+                self.config["paths"][root_name] = str(
+                    self.report_root if root_name == "report_root" else self.manifest_root
+                )
+
     def test_blocks_deep_lane_without_required_reviewer_configuration(self):
         """A deep lane cannot proceed without its two-reviewer contract."""
         self.config["review"].update(deep_paths=["feature.txt"], commands=[])

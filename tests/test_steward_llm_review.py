@@ -252,10 +252,58 @@ class StewardLlmReviewTests(unittest.TestCase):
             {"primary.json", "adversarial.json"},
         )
 
+    def test_rejects_stale_manifest_after_checkout_head_advances_before_invoking_hermes(self):
+        """An old ready manifest cannot launch reviewers or persist old-SHA reports."""
+        (self.repo / "later-change.txt").write_text("new committed state\n")
+        subprocess.run(["git", "add", "later-change.txt"], cwd=self.repo, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "advance review checkout"],
+            cwd=self.repo,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+
+        result = self.run_orchestrator()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("HEAD does not match manifest", result.stderr)
+        self.assertFalse(self.hermes_log.exists())
+        self.assertFalse(list(self.report_root.rglob("*.json")))
+
+    def test_rejects_stale_manifest_after_base_ref_moves_before_invoking_hermes(self):
+        """A changed base binding cannot launch reviewers or write artifacts."""
+        subprocess.run(["git", "checkout", "main"], cwd=self.repo, check=True, capture_output=True)
+        (self.repo / "base-change.txt").write_text("new base state\n")
+        subprocess.run(["git", "add", "base-change.txt"], cwd=self.repo, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "advance base ref"],
+            cwd=self.repo,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "checkout", "feature/exact-state"], cwd=self.repo, check=True, capture_output=True
+        )
+
+        result = self.run_orchestrator()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("base ref does not match manifest", result.stderr)
+        self.assertFalse(self.hermes_log.exists())
+        self.assertFalse(list(self.report_root.rglob("*.json")))
+
     def test_accepts_ready_detached_head_manifest_with_head_sha_branch_segment(self):
         """An exactly empty branch binds detached-head reviewer state to the validated SHA."""
         self.manifest["branch"] = ""
         self.write_manifest()
+        subprocess.run(
+            ["git", "checkout", "--detach", self.head_sha],
+            cwd=self.repo,
+            check=True,
+            capture_output=True,
+        )
 
         result = self.run_orchestrator()
 
@@ -540,7 +588,6 @@ class StewardLlmReviewTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(artifact.stat().st_mode), 0o600)
 
     def test_rejects_preexisting_nonprivate_report_root_before_invoking_hermes(self):
-        self.report_root.mkdir(mode=0o755)
         self.report_root.chmod(0o755)
 
         result = self.run_orchestrator()

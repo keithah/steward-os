@@ -6,6 +6,7 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -177,6 +178,32 @@ def _prepare_builtin_state_root(repo_dir: Path) -> Path:
     if info.st_mode & 0o077:
         raise ReviewError("existing built-in state root must be private")
     return state_root
+
+
+def prepare_private_state_root(root: Path, label: str) -> None:
+    """Create a new state root privately or validate an existing one unchanged."""
+    try:
+        root.mkdir(parents=True, mode=0o700)
+        created = True
+    except FileExistsError:
+        created = False
+    except OSError as error:
+        raise ReviewError(f"cannot create {label}: {error}") from error
+    if created:
+        try:
+            os.chmod(root, 0o700)
+        except OSError as error:
+            raise ReviewError(f"cannot secure {label}: {error}") from error
+    try:
+        root_stat = root.stat()
+    except OSError as error:
+        raise ReviewError(f"cannot inspect {label}: {error}") from error
+    if (
+        not stat.S_ISDIR(root_stat.st_mode)
+        or root_stat.st_uid != os.getuid()
+        or stat.S_IMODE(root_stat.st_mode) & 0o077
+    ):
+        raise ReviewError(f"{label} must be owner-private")
 
 
 def builtin_config(repo_dir: Path) -> dict:
@@ -540,6 +567,8 @@ def main() -> int:
         manifest = git_state(repo_dir, config["repository"]["base_ref"])
         if config_source == "builtin-default":
             _prepare_builtin_state_root(repo_dir)
+        for name in ("report_root", "manifest_root"):
+            prepare_private_state_root(Path(config["paths"][name]), name)
         lane = select_lane(manifest["changed_paths"], config["review"])
         required_reviewers = config["review"].get("reviewers")
         evidence_gaps = (

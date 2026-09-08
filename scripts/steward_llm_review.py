@@ -115,6 +115,16 @@ def _sanitize_branch(branch: str) -> str:
     return segment
 
 
+def _git(repo_dir: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo_dir,
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.strip()
+
+
 def load_context(repo_dir: Path, manifest_path: Path) -> dict:
     try:
         manifest = json.loads(manifest_path.read_text())
@@ -131,6 +141,7 @@ def load_context(repo_dir: Path, manifest_path: Path) -> dict:
     head_sha = _require_hash(manifest.get("head_sha"), "head_sha", _SHA_PATTERN)
     branch_value = manifest.get("branch")
     branch = head_sha if branch_value == "" else _require_string(branch_value, "branch")
+    base_ref = _require_string(manifest.get("base_ref"), "base_ref")
     report_root_value = manifest.get("report_root")
     if report_root_value is None:
         raise ReviewError("report_root missing")
@@ -155,6 +166,8 @@ def load_context(repo_dir: Path, manifest_path: Path) -> dict:
         "repo_dir": repo_dir,
         "repository": repository,
         "branch": branch,
+        "manifest_branch": branch_value,
+        "base_ref": base_ref,
         "head_sha": head_sha,
         "base_sha": _require_hash(manifest.get("base_sha"), "base_sha", _SHA_PATTERN),
         "merge_base_sha": _require_hash(
@@ -166,6 +179,29 @@ def load_context(repo_dir: Path, manifest_path: Path) -> dict:
         "report_root": report_root,
         "reviewers": reviewers,
     }
+
+
+def revalidate_context(context: dict) -> None:
+    """Fail closed unless the checkout still matches all manifest Git bindings."""
+    try:
+        if _git(context["repo_dir"], "rev-parse", "HEAD") != context["head_sha"]:
+            raise ReviewError("HEAD does not match manifest")
+        if _git(context["repo_dir"], "rev-parse", context["base_ref"]) != context["base_sha"]:
+            raise ReviewError("base ref does not match manifest")
+        if (
+            _git(context["repo_dir"], "merge-base", "HEAD", context["base_ref"])
+            != context["merge_base_sha"]
+        ):
+            raise ReviewError("merge base does not match manifest")
+        current_branch = _git(context["repo_dir"], "branch", "--show-current")
+        if context["manifest_branch"] == "":
+            if current_branch:
+                raise ReviewError("checkout branch does not match detached manifest")
+        elif current_branch != context["manifest_branch"]:
+            raise ReviewError("checkout branch does not match manifest")
+    except subprocess.CalledProcessError as error:
+        message = error.stderr.strip() or error.stdout.strip() or str(error)
+        raise ReviewError(f"git revalidation failed: {message}") from error
 
 
 def _prompt(role: str, context: dict) -> str:
@@ -399,6 +435,7 @@ def main() -> int:
         if not repo_dir.is_dir():
             raise ReviewError("repo-dir must be a directory")
         context = load_context(repo_dir, args.manifest.resolve())
+        revalidate_context(context)
         ensure_private_report_root(context["report_root"])
         context["diff"] = committed_diff(context)
         artifacts = {
