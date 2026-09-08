@@ -31,7 +31,9 @@ _FORBIDDEN_FIELDS = frozenset({
 _TOKEN_PATTERN = re.compile(
     r"(?:\b(?:github_pat|gh[pours])_[A-Za-z0-9_]{20,}\b"
     r"|\bbearer\s+[A-Za-z0-9._~+/=-]{20,}\b"
-    r"|\b(?:api[_-]?key|token|secret|password)\s*[:=]\s*[A-Za-z0-9._~+/=-]{20,}\b)",
+    r"|\b(?:api[_-]?key|token|secret|password)\s*[:=]\s*[A-Za-z0-9._~+/=-]{20,}\b"
+    r"|\bsk-proj-[A-Za-z0-9_-]{48,}\b"
+    r"|\bsk-[A-Za-z0-9_-]{48,}\b)",
     re.IGNORECASE,
 )
 _ABSOLUTE_PATH_PATTERN = re.compile(r"(?:^/|^[A-Za-z]:[\\/]|^\\\\)")

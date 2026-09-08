@@ -65,11 +65,18 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
         invalid_cases.append([token_like])
         github_pat = copy.deepcopy(case)
         github_pat["hypothesis"] = "github_pat_" + "A" * 82
+        sk_proj = copy.deepcopy(case)
+        sk_proj["hypothesis"] = "Potential credential: sk-proj-" + "A" * 48
+        sk = copy.deepcopy(case)
+        sk["hypothesis"] = "Potential credential: sk-" + "A" * 48
+        short_sk_prose = copy.deepcopy(case)
+        short_sk_prose["hypothesis"] = "«redacted:sk-brief-note»"
+        self.assertEqual(validate_cases([short_sk_prose]), [short_sk_prose])
         nested_body = copy.deepcopy(case)
         nested_body["source"]["body"] = "raw bot prose"
         absolute_path = copy.deepcopy(case)
         absolute_path["hypothesis"] = "/Users/alice/work/private-repo/config.json"
-        for unsafe in (github_pat, nested_body, absolute_path):
+        for unsafe in (github_pat, sk_proj, sk, nested_body, absolute_path):
             with self.subTest(unsafe=unsafe):
                 with self.assertRaises(ValueError):
                     validate_cases([unsafe])
