@@ -63,6 +63,22 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
         token_like = copy.deepcopy(case)
         token_like["hypothesis"] = "Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123456789"
         invalid_cases.append([token_like])
+        github_pat = copy.deepcopy(case)
+        github_pat["hypothesis"] = "github_pat_" + "A" * 82
+        nested_body = copy.deepcopy(case)
+        nested_body["source"]["body"] = "raw bot prose"
+        absolute_path = copy.deepcopy(case)
+        absolute_path["hypothesis"] = "/Users/alice/work/private-repo/config.json"
+        for unsafe in (github_pat, nested_body, absolute_path):
+            with self.subTest(unsafe=unsafe):
+                with self.assertRaises(ValueError):
+                    validate_cases([unsafe])
+        unexpected_top_level = copy.deepcopy(case)
+        unexpected_top_level["extra"] = "not permitted"
+        invalid_cases.append([unexpected_top_level])
+        unexpected_source_field = copy.deepcopy(case)
+        unexpected_source_field["source"]["extra"] = "not permitted"
+        invalid_cases.append([unexpected_source_field])
         missing_metadata = copy.deepcopy(case)
         del missing_metadata["revision"]
         invalid_cases.append([missing_metadata])

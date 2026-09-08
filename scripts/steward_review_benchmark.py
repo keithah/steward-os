@@ -6,7 +6,7 @@ import argparse
 import json
 import re
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 VALID_DEFECT_CLASSES = frozenset({
     "capability-boundary",
@@ -23,14 +23,18 @@ _REQUIRED_FIELDS = frozenset({
     "id", "source", "revision", "language", "defect_class", "hypothesis",
     "expected_probes", "severity", "disposition",
 })
+_SOURCE_FIELDS = frozenset({"repository", "pr"})
 _FORBIDDEN_FIELDS = frozenset({
     "body", "comment", "comments", "review", "review_body", "raw_review",
     "transcript", "prompt", "diff_hunk",
 })
 _TOKEN_PATTERN = re.compile(
-    r"(?:bearer\s+|(?:api[_-]?key|token|secret|password)\s*[:=]\s*)[A-Za-z0-9._~+/=-]{20,}",
+    r"(?:\b(?:github_pat|gh[pours])_[A-Za-z0-9_]{20,}\b"
+    r"|\bbearer\s+[A-Za-z0-9._~+/=-]{20,}\b"
+    r"|\b(?:api[_-]?key|token|secret|password)\s*[:=]\s*[A-Za-z0-9._~+/=-]{20,}\b)",
     re.IGNORECASE,
 )
+_ABSOLUTE_PATH_PATTERN = re.compile(r"(?:^/|^[A-Za-z]:[\\/]|^\\\\)")
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _PROBE_SEPARATORS = re.compile(r"[_\s]+")
 
@@ -40,15 +44,22 @@ def normalize_probe_id(value: str) -> str:
     return _PROBE_SEPARATORS.sub("-", value.strip().lower())
 
 
-def _walk_values(value: Any) -> Iterable[str]:
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, dict):
-        for child in value.values():
-            yield from _walk_values(child)
+def _validate_redaction(value: Any, path: tuple[str, ...] = ()) -> None:
+    """Reject raw review content, secrets, and live paths at every nesting level."""
+    location = ".".join(path) or "<root>"
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key in _FORBIDDEN_FIELDS:
+                raise ValueError(f"raw review field is not permitted at {location}")
+            _validate_redaction(child, (*path, str(key)))
     elif isinstance(value, list):
-        for child in value:
-            yield from _walk_values(child)
+        for index, child in enumerate(value):
+            _validate_redaction(child, (*path, str(index)))
+    elif isinstance(value, str):
+        if _TOKEN_PATTERN.search(value):
+            raise ValueError(f"token-like string is not permitted at {location}")
+        if _ABSOLUTE_PATH_PATTERN.search(value):
+            raise ValueError(f"absolute path is not permitted at {location}")
 
 
 def validate_cases(cases: Any) -> list[dict[str, Any]]:
@@ -58,15 +69,15 @@ def validate_cases(cases: Any) -> list[dict[str, Any]]:
 
     ids: set[str] = set()
     for case in cases:
-        if not isinstance(case, dict) or _REQUIRED_FIELDS - case.keys():
-            raise ValueError("each case must contain the required benchmark fields")
-        if _FORBIDDEN_FIELDS & case.keys():
-            raise ValueError("raw review fields are not permitted in the corpus")
+        if not isinstance(case, dict) or case.keys() != _REQUIRED_FIELDS:
+            raise ValueError("each case must contain exactly the required benchmark fields")
+        _validate_redaction(case)
         if not isinstance(case["id"], str) or not case["id"] or case["id"] in ids:
             raise ValueError("case IDs must be unique non-empty strings")
         ids.add(case["id"])
         source = case["source"]
-        if (not isinstance(source, dict) or not isinstance(source.get("repository"), str)
+        if (not isinstance(source, dict) or source.keys() != _SOURCE_FIELDS
+                or not isinstance(source.get("repository"), str)
                 or not source["repository"] or not isinstance(source.get("pr"), int)
                 or source["pr"] <= 0):
             raise ValueError("each case requires a source repository and PR number")
@@ -78,8 +89,6 @@ def validate_cases(cases: Any) -> list[dict[str, Any]]:
         if (not isinstance(probes, list) or not probes
                 or any(not isinstance(probe, str) or not normalize_probe_id(probe) for probe in probes)):
             raise ValueError("each case requires an expected probe list")
-        if any(_TOKEN_PATTERN.search(text) for text in _walk_values(case)):
-            raise ValueError("token-like strings are not permitted in the corpus")
     return cases
 
 
