@@ -541,6 +541,9 @@ class StewardLlmReviewTests(unittest.TestCase):
             {"primary.json", "adversarial.json"},
         )
 
+    def test_reviewer_timeout_is_a_fixed_five_minute_bound(self):
+        self.assertEqual(self.review_module._REVIEWER_TIMEOUT_SECONDS, 300)
+
     def test_reference_documents_query_file_reviewer_isolation_without_stale_hold(self):
         reference_path = Path(__file__).resolve().parents[1] / "docs" / "reference" / "hermes-pr-review-gate.md"
         reference_content = reference_path.read_text()
