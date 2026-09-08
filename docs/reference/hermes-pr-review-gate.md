@@ -17,6 +17,8 @@ Keep this repository public-safe. Store live configuration, manifests, reports, 
 3. Optionally copy [`setup/hermes-review-config.example.json`](../../setup/hermes-review-config.example.json) to a private configuration directory when you need custom state roots, lane patterns, or trusted deterministic checks. Do not put secrets, tokens, hostnames, or live local paths in public files.
 4. Load [`skills/hermes-pr-review/SKILL.md`](../../skills/hermes-pr-review/SKILL.md) in Hermes for the review procedure.
 
+Reviewer provider/model identifiers are private operator policy, not credentials: the selected identities are primary `anthropic`/`claude-opus-4-6` and adversarial `xai-oauth`/`grok-4.6`. No OAuth value belongs in JSON.
+
 A sanitized configuration has this complete shape:
 
 ```json
@@ -33,6 +35,10 @@ A sanitized configuration has this complete shape:
     "sensitive_paths": ["auth/**"],
     "visual_paths": ["web/**"],
     "deep_paths": ["src/**"],
+    "reviewers": {
+      "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
+      "adversarial": {"provider": "xai-oauth", "model": "grok-4.6"}
+    },
     "execute_contributor_code": false,
     "sandbox_available": false,
     "command_timeout_seconds": 300,
@@ -76,7 +82,9 @@ It records the exact repository, branch, base ref, base SHA, merge-base SHA, hea
 - **deep:** a changed path matches a deep or sensitive pattern. Hermes performs the primary review plus a separate adversarial review.
 - **visual:** a changed path matches a visual pattern. Hermes performs the primary review plus a separate adversarial review, including visual evidence where available.
 
-Hermes reads the manifest before reviewing. A `blocked` manifest stops the procedure. For a ready manifest, Hermes inspects the diff, changed paths, repository instructions, deterministic command evidence, relevant paths, and current PR checks/comments when a PR exists. Hermes writes its Markdown report outside the public checkout, under the configured private report root, binding it to the same exact state as the manifest.
+Every deep or visual run requires the configured primary and adversarial roles and two exact-SHA artifacts bound to the same repository, configuration revision, base SHA, merge-base SHA, and head SHA. The artifact provider and model must exactly match the configured identity; there is no fallback acceptance.
+
+Hermes reads the manifest before reviewing. A `blocked` manifest stops the procedure. Each reviewer keeps private-only prompt, transcript, and artifact state outside the public checkout and GitHub. Review agents have no GitHub writes or reviewed-code execution; any future sandbox is the only boundary for executing reviewed code. **Isolation hold:** `--ignore-user-config` alone does not suppress checkout instructions or tools. Because isolation remediation is pending, do not run reviewer or smoke commands from a reviewed checkout. Any future invocation must run outside that checkout with `--safe-mode` and `--toolsets none` (a zero-tool capability set), then be verified before acceptance. For a ready manifest, Hermes inspects the diff, changed paths, repository instructions, deterministic command evidence, relevant paths, and current PR checks/comments when a PR exists. Hermes writes its Markdown report outside the public checkout, under the configured private report root, binding it to the same exact state as the manifest.
 
 A clean conclusion is permitted only for a ready, complete, current review:
 

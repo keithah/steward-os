@@ -25,12 +25,12 @@
     ],
     "reviewers": {
       "primary": {
-        "provider": "example-primary-provider",
-        "model": "example-primary-model"
+        "provider": "anthropic",
+        "model": "claude-opus-4-6"
       },
       "adversarial": {
-        "provider": "example-adversarial-provider",
-        "model": "example-adversarial-model"
+        "provider": "xai-oauth",
+        "model": "grok-4.6"
       }
     },
     "execute_contributor_code": false,

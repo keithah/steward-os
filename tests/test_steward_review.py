@@ -634,10 +634,12 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(manifest["commands"][0]["exit_code"], 7)
 
     def test_public_skill_has_required_local_only_contract(self):
-        """Exercise the Steward review gate behavior."""
+        """The published procedure documents the private two-reviewer contract."""
         skill_path = Path(__file__).resolve().parents[1] / "skills" / "hermes-pr-review" / "SKILL.md"
-        content = skill_path.read_text()
-        required = [
+        reference_path = Path(__file__).resolve().parents[1] / "docs" / "reference" / "hermes-pr-review-gate.md"
+        skill_content = skill_path.read_text()
+        reference_content = reference_path.read_text()
+        skill_required = [
             "python3 scripts/steward_review.py",
             "No verified blocker found in this Steward pass.",
             "do not create or alter any GitHub object",
@@ -645,9 +647,53 @@ class StewardReviewTests(unittest.TestCase):
             "When the selected lane is `deep` or `visual`",
             "config_revision",
         ]
-        for value in required:
-            with self.subTest(value=value):
-                self.assertIn(value, content)
+        reference_required = [
+            "two exact-SHA artifacts",
+            "`anthropic`/`claude-opus-4-6`",
+            "`xai-oauth`/`grok-4.6`",
+            "private-only prompt, transcript, and artifact state",
+            "no fallback acceptance",
+            "no GitHub writes or reviewed-code execution",
+            "future sandbox",
+            "--safe-mode",
+            "--toolsets none",
+            "isolation remediation is pending",
+        ]
+        for value in skill_required:
+            with self.subTest(location="skill", value=value):
+                self.assertIn(value, skill_content)
+        for value in reference_required:
+            with self.subTest(location="reference", value=value):
+                self.assertIn(value, reference_content)
+
+    def test_public_example_contains_only_reviewer_identities_not_credentials(self):
+        """The checked-in example pins identities without credential-shaped fields."""
+        example_path = Path(__file__).resolve().parents[1] / "setup" / "hermes-review-config.example.json"
+        example = json.loads(example_path.read_text())
+        reviewers = example["review"]["reviewers"]
+        self.assertEqual(
+            reviewers,
+            {
+                "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
+                "adversarial": {"provider": "xai-oauth", "model": "grok-4.6"},
+            },
+        )
+
+        def walk(value):
+            if isinstance(value, dict):
+                for key, nested in value.items():
+                    yield key
+                    yield from walk(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    yield from walk(nested)
+
+        forbidden_key_fragments = ("token", "secret", "credential", "password", "api_key", "oauth_value")
+        keys = [key.lower() for key in walk(example)]
+        self.assertFalse(
+            [key for key in keys if any(fragment in key for fragment in forbidden_key_fragments)],
+            "public config must not contain credential fields",
+        )
 
     def test_requires_two_reviewers_for_deep_lane(self):
         """Deep review records the exact configured reviewer contract."""
