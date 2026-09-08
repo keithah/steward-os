@@ -60,6 +60,24 @@ class StewardLlmReviewTests(unittest.TestCase):
                     "query_mode": query_path.stat().st_mode & 0o777,
                 }) + "\\n")
             role = "primary" if '"role": "primary"' in prompt else "adversarial"
+            role_probes = {
+                "primary": [
+                    "primary.changed-file-callers-tests",
+                    "primary.public-contract-compatibility",
+                    "primary.malformed-omitted-negative-timezone-inputs",
+                    "primary.error-propagation",
+                ],
+                "adversarial": [
+                    "adversarial.policy-effectful-sinks",
+                    "adversarial.token-output-redirect-boundaries",
+                    "adversarial.cancellation-partial-success-compensation",
+                    "adversarial.writers-shared-locks",
+                    "adversarial.pagination-snapshots-changed-totals",
+                    "adversarial.ordering-deduplication",
+                    "adversarial.ambient-credentials-caller-authorization",
+                    "adversarial.process-cleanup-status-propagation",
+                ],
+            }
             behavior = os.environ["FAKE_HERMES_BEHAVIOR"]
             if behavior == "reviewer-fails" and role == "primary":
                 raise SystemExit(9)
@@ -78,9 +96,9 @@ class StewardLlmReviewTests(unittest.TestCase):
                 "provider": f"{role}-provider",
                 "model": f"{role}-model",
                 "status": "complete",
-                "findings": [{"probe_id": f"{role}-probe"}],
+                "findings": [{"probe_id": role_probes[role][0]}],
                 "probes": [{
-                    "probe_id": f"{role}-probe",
+                    "probe_id": role_probes[role][0],
                     "status": "finding",
                     "evidence": "fake reviewer evidence",
                 }],
@@ -97,6 +115,20 @@ class StewardLlmReviewTests(unittest.TestCase):
             if behavior == "writes-empty-review-evidence" and role == "primary":
                 artifact["findings"] = []
                 artifact["probes"] = []
+            if behavior == "writes-incomplete-clean" and role == "primary":
+                artifact["findings"] = []
+                artifact["probes"] = [{
+                    "probe_id": role_probes[role][0],
+                    "status": "passed",
+                    "evidence": "only one clean probe",
+                }]
+            if behavior == "writes-complete-clean":
+                artifact["findings"] = []
+                artifact["probes"] = [{
+                    "probe_id": probe_id,
+                    "status": "passed",
+                    "evidence": "complete clean probe",
+                } for probe_id in role_probes[role]]
             print(json.dumps(artifact))
         """).replace("__PYTHON__", sys.executable).replace(
             "__HEAD_SHA__", self.head_sha
@@ -334,6 +366,30 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("probes", result.stderr)
         self.assertFalse(list(self.report_root.rglob("*.json")))
+
+    def test_rejects_incomplete_clean_probe_coverage_before_persisting_artifacts(self):
+        result = self.run_orchestrator("writes-incomplete-clean")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("complete", result.stderr)
+        self.assertFalse(list(self.report_root.rglob("*.json")))
+
+    def test_accepts_complete_clean_primary_and_adversarial_probe_coverage(self):
+        result = self.run_orchestrator("writes-complete-clean")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            {path.name for path in self.report_root.rglob("*.json")},
+            {"primary.json", "adversarial.json"},
+        )
+
+    def test_reference_documents_query_file_reviewer_isolation_without_stale_hold(self):
+        reference_path = Path(__file__).resolve().parents[1] / "docs" / "reference" / "hermes-pr-review-gate.md"
+        reference_content = reference_path.read_text()
+
+        self.assertIn("external private working directory", reference_content)
+        self.assertIn("--query-file", reference_content)
+        self.assertNotIn("Because isolation remediation is pending", reference_content)
 
     def test_reviewer_isolated_from_checkout_and_receives_only_committed_diff(self):
         """The model gets a host-generated committed diff from a private cwd."""

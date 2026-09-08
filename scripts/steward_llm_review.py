@@ -20,20 +20,38 @@ _REVISION_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _MAX_PROMPT_DIFF_BYTES = 256 * 1024
 _ROLE_PROBES = {
     "primary": (
-        "full changed-file/caller/test inspection",
-        "public contract and compatibility paths",
-        "malformed/omitted/negative/timezone inputs",
-        "error propagation",
+        ("primary.changed-file-callers-tests", "full changed-file/caller/test inspection"),
+        ("primary.public-contract-compatibility", "public contract and compatibility paths"),
+        (
+            "primary.malformed-omitted-negative-timezone-inputs",
+            "malformed/omitted/negative/timezone inputs",
+        ),
+        ("primary.error-propagation", "error propagation"),
     ),
     "adversarial": (
-        "policy at effectful sinks",
-        "token/output/redirect boundaries",
-        "cancellation and partial-success compensation",
-        "all writers and shared locks",
-        "pagination snapshots and changed totals",
-        "ordering/deduplication",
-        "ambient credentials and caller-widenable authorization",
-        "process cleanup and status propagation",
+        ("adversarial.policy-effectful-sinks", "policy at effectful sinks"),
+        (
+            "adversarial.token-output-redirect-boundaries",
+            "token/output/redirect boundaries",
+        ),
+        (
+            "adversarial.cancellation-partial-success-compensation",
+            "cancellation and partial-success compensation",
+        ),
+        ("adversarial.writers-shared-locks", "all writers and shared locks"),
+        (
+            "adversarial.pagination-snapshots-changed-totals",
+            "pagination snapshots and changed totals",
+        ),
+        ("adversarial.ordering-deduplication", "ordering/deduplication"),
+        (
+            "adversarial.ambient-credentials-caller-authorization",
+            "ambient credentials and caller-widenable authorization",
+        ),
+        (
+            "adversarial.process-cleanup-status-propagation",
+            "process cleanup and status propagation",
+        ),
     ),
 }
 _ARTIFACT_KEYS = {
@@ -164,9 +182,11 @@ def _prompt(role: str, context: dict) -> str:
                 "an object with a nonblank normalized string probe_id. Every probes entry must be "
                 "an object with exactly probe_id, status, and evidence fields, each a nonblank "
                 "normalized string; status must be passed, not-applicable, or finding. If findings "
-                "is empty, probes must record applicable checklist outcomes. Review every item in "
-                "this role-specific checklist: "
-                + "; ".join(_ROLE_PROBES[role])
+                "is empty, probes must record exactly one outcome for every checklist ID. Review "
+                "every role-specific checklist item, using its stable ID: "
+                + "; ".join(
+                    f"{probe_id}: {description}" for probe_id, description in _ROLE_PROBES[role]
+                )
                 + "."
             ),
             "bindings": bindings,
@@ -247,20 +267,29 @@ def validate_artifact(artifact: dict, role: str, reviewer: dict, context: dict) 
     for key in ("findings", "probes", "limitations"):
         if not isinstance(artifact[key], list):
             raise ReviewError(f"{key} must be a list")
+    valid_probe_ids = {probe_id for probe_id, _ in _ROLE_PROBES[role]}
     for finding in artifact["findings"]:
         if not isinstance(finding, dict):
             raise ReviewError("finding must be an object")
-        _require_normalized_string(finding.get("probe_id"), "finding probe_id")
+        finding_probe_id = _require_normalized_string(finding.get("probe_id"), "finding probe_id")
+        if finding_probe_id not in valid_probe_ids:
+            raise ReviewError("finding probe_id invalid")
+    probe_ids = set()
     for probe in artifact["probes"]:
         if not isinstance(probe, dict) or set(probe) != {"probe_id", "status", "evidence"}:
             raise ReviewError("probe schema mismatch")
-        _require_normalized_string(probe["probe_id"], "probe probe_id")
+        probe_id = _require_normalized_string(probe["probe_id"], "probe probe_id")
+        if probe_id not in valid_probe_ids:
+            raise ReviewError("probe probe_id invalid")
+        if probe_id in probe_ids:
+            raise ReviewError("probe IDs must be unique")
+        probe_ids.add(probe_id)
         status = _require_normalized_string(probe["status"], "probe status")
         if status not in {"passed", "not-applicable", "finding"}:
             raise ReviewError("probe status invalid")
         _require_normalized_string(probe["evidence"], "probe evidence")
-    if not artifact["findings"] and not artifact["probes"]:
-        raise ReviewError("probes required when findings is empty")
+    if not artifact["findings"] and probe_ids != valid_probe_ids:
+        raise ReviewError("complete role probes coverage required when findings is empty")
 
 
 def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> dict:
