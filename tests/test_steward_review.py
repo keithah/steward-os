@@ -668,6 +668,24 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(manifest["required_reviewers"], reviewers)
         self.assertEqual(manifest["reviewer_contract_version"], "1")
 
+    def test_records_private_report_root_in_ready_manifest(self):
+        """Ready manifests bind the resolved private artifact root."""
+        self.config["review"].update(
+            deep_paths=["feature.txt"],
+            reviewers={
+                "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
+                "adversarial": {"provider": "xai-oauth", "model": "grok-4.6"},
+            },
+            commands=[],
+        )
+        self.write_config()
+
+        result = self.run_runner()
+        manifest = self.read_manifest()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(manifest["report_root"], str(self.report_root.resolve()))
+
     def test_blocks_deep_lane_without_required_reviewer_configuration(self):
         """A deep lane cannot proceed without its two-reviewer contract."""
         self.config["review"].update(deep_paths=["feature.txt"], commands=[])

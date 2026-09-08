@@ -554,6 +554,7 @@ def main() -> int:
                 "base_ref": config["repository"]["base_ref"],
                 "config_revision": _config_revision(config),
                 "config_source": config_source,
+                "report_root": str(Path(config["paths"]["report_root"]).resolve()),
                 "status": "ready",
                 "lane": lane,
                 "required_reviewers": required_reviewers,

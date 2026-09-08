@@ -117,6 +117,90 @@ class StewardLlmReviewTests(unittest.TestCase):
             },
         )
 
+    def write_ready_runner_manifest(self):
+        """Produce a ready manifest through the real local review runner."""
+        def run_git(*args):
+            subprocess.run(
+                ["git", *args],
+                cwd=self.repo,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        run_git("init")
+        run_git("checkout", "-b", "main")
+        run_git("config", "user.email", "tests@example.invalid")
+        run_git("config", "user.name", "Steward Tests")
+        run_git("remote", "add", "origin", "https://github.com/acme/widget.git")
+        (self.repo / "README.md").write_text("base\n")
+        run_git("add", "README.md")
+        run_git("commit", "-m", "base")
+        run_git("checkout", "-b", "feature/exact-state")
+        (self.repo / "feature.txt").write_text("feature\n")
+        run_git("add", "feature.txt")
+        run_git("commit", "-m", "feature")
+
+        manifest_root = self.root / "manifests"
+        config_path = self.root / "config.json"
+        config_path.write_text(json.dumps({
+            "repository": {"id": "acme/widget", "base_ref": "main"},
+            "paths": {
+                "report_root": str(self.report_root),
+                "manifest_root": str(manifest_root),
+            },
+            "review": {
+                "sensitive_paths": ["auth/**"],
+                "visual_paths": ["web/**"],
+                "deep_paths": ["feature.txt"],
+                "reviewers": self.manifest["required_reviewers"],
+                "execute_contributor_code": False,
+                "sandbox_available": False,
+                "command_timeout_seconds": 30,
+                "safe_commands_execute_reviewed_code": False,
+                "commands": [],
+            },
+        }))
+        review_runner = Path(__file__).resolve().parents[1] / "scripts" / "steward_review.py"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(review_runner),
+                "--repo-dir",
+                str(self.repo),
+                "--config",
+                str(config_path),
+            ],
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.manifest_path = Path(result.stdout.strip())
+        ready_manifest = json.loads(self.manifest_path.read_text())
+        for name in ("head_sha", "base_sha", "merge_base_sha", "config_revision"):
+            previous = getattr(self, name)
+            current = ready_manifest[name]
+            self.fake_hermes.write_text(self.fake_hermes.read_text().replace(previous, current))
+            setattr(self, name, current)
+
+    def test_accepts_ready_runner_manifest_contract(self):
+        """A real ready manifest drives both fake reviewer artifact writes."""
+        self.write_ready_runner_manifest()
+
+        result = self.run_orchestrator()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        destination = (
+            self.report_root
+            / "acme__widget"
+            / "branch-feature-exact-state"
+            / self.head_sha
+        )
+        self.assertEqual(
+            {path.name for path in destination.glob("*.json")},
+            {"primary.json", "adversarial.json"},
+        )
+
     def test_requires_both_primary_and_adversarial_artifacts(self):
         result = self.run_orchestrator("writes-valid-primary-only")
 
@@ -167,6 +251,17 @@ class StewardLlmReviewTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("report_root missing", result.stderr)
+        self.assertFalse(self.hermes_log.exists())
+
+    def test_rejects_report_root_inside_reviewed_checkout_before_invoking_hermes(self):
+        """A repo-controlled artifact root is rejected before reviewer launch."""
+        self.manifest["report_root"] = str(self.repo / "reports")
+        self.write_manifest()
+
+        result = self.run_orchestrator()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("report_root must be outside reviewed checkout", result.stderr)
         self.assertFalse(self.hermes_log.exists())
 
     def test_persists_valid_primary_and_adversarial_artifacts_atomically(self):
