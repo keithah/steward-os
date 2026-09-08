@@ -86,6 +86,10 @@ class StewardLlmReviewTests(unittest.TestCase):
             if behavior == "writes-malformed-json" and role == "primary":
                 print("not json")
                 raise SystemExit(0)
+            if behavior == "writes-tirith-warning":
+                print("  ⚠ tirith security scanner enabled but not available — command scanning will use pattern matching only")
+            if behavior == "writes-untrusted-prefix" and role == "primary":
+                print("untrusted diagnostic")
             artifact = {
                 "repository": "acme/widget",
                 "head_sha": "__HEAD_SHA__",
@@ -269,6 +273,22 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertIn("must emit exactly one JSON object", result.stderr)
         self.assertFalse(list(self.report_root.rglob("*.json")))
 
+    def test_accepts_only_exact_tirith_diagnostic_before_valid_artifacts(self):
+        result = self.run_orchestrator("writes-tirith-warning")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            {path.name for path in self.report_root.rglob("*.json")},
+            {"primary.json", "adversarial.json"},
+        )
+
+    def test_rejects_nonexact_prefix_before_valid_artifact(self):
+        result = self.run_orchestrator("writes-untrusted-prefix")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must emit exactly one JSON object", result.stderr)
+        self.assertFalse(list(self.report_root.rglob("*.json")))
+
     def test_rejects_artifact_bound_to_a_different_head(self):
         result = self.run_orchestrator("writes-mismatched-sha")
 
@@ -334,7 +354,9 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertEqual(len(invocations), 2)
         for invocation, role in zip(invocations, ("primary", "adversarial")):
             args = invocation["args"]
-            for argument in ("--safe-mode", "--toolsets", ",", "--max-turns", "1", "--oneshot"):
+            for argument in (
+                "--safe-mode", "--toolsets", "context_engine", "--max-turns", "1", "--oneshot"
+            ):
                 self.assertIn(argument, args)
             self.assertEqual(args[args.index("--provider") + 1], f"{role}-provider")
             self.assertEqual(args[args.index("--model") + 1], f"{role}-model")
@@ -404,7 +426,7 @@ class StewardLlmReviewTests(unittest.TestCase):
         for invocation in invocations:
             args = invocation["args"]
             for argument in (
-                "chat", "--safe-mode", "--toolsets", ",", "--max-turns", "1",
+                "chat", "--safe-mode", "--toolsets", "context_engine", "--max-turns", "1",
                 "--quiet", "--oneshot", "--query-file",
             ):
                 self.assertIn(argument, args)

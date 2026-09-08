@@ -18,6 +18,10 @@ _ROLES = ("primary", "adversarial")
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _MAX_PROMPT_DIFF_BYTES = 256 * 1024
+_TIRITH_UNAVAILABLE_DIAGNOSTIC = (
+    "  ⚠ tirith security scanner enabled but not available "
+    "— command scanning will use pattern matching only\n"
+)
 _ROLE_PROBES = {
     "primary": (
         ("primary.changed-file-callers-tests", "full changed-file/caller/test inspection"),
@@ -240,6 +244,8 @@ def ensure_private_report_root(report_root: Path) -> None:
 
 
 def parse_only_json(output: str, role: str) -> dict:
+    if output.startswith(_TIRITH_UNAVAILABLE_DIAGNOSTIC):
+        output = output.removeprefix(_TIRITH_UNAVAILABLE_DIAGNOSTIC)
     if not output.strip():
         raise ReviewError(f"{role} artifact missing")
     try:
@@ -304,7 +310,7 @@ def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> d
             "chat",
             "--safe-mode",
             "--toolsets",
-            ",",
+            "context_engine",
             "--max-turns",
             "1",
             "--provider",
