@@ -218,7 +218,13 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(manifest["commands"], [])
         self.assertEqual(manifest["config_source"], "builtin-default")
         self.assertEqual(manifest["status"], "blocked")
-        self.assertEqual(manifest["evidence_gaps"], ["no repository-specific review configuration"])
+        self.assertEqual(
+            manifest["evidence_gaps"],
+            [
+                "no repository-specific review configuration",
+                "missing required reviewer configuration",
+            ],
+        )
         self.assertEqual(state_root.stat().st_mode & 0o777, 0o700)
 
     def test_builtin_default_uses_a_private_runtime_subdirectory(self):
@@ -407,6 +413,10 @@ class StewardReviewTests(unittest.TestCase):
         ]
         self.config["review"]["execute_contributor_code"] = False
         self.config["review"]["sandbox_available"] = False
+        self.config["review"]["reviewers"] = {
+            "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
+            "adversarial": {"provider": "xai-oauth", "model": "grok-4.6"},
+        }
         self.write_config()
 
         result = self.run_runner()
@@ -638,6 +648,75 @@ class StewardReviewTests(unittest.TestCase):
         for value in required:
             with self.subTest(value=value):
                 self.assertIn(value, content)
+
+    def test_requires_two_reviewers_for_deep_lane(self):
+        """Deep review records the exact configured reviewer contract."""
+        reviewers = {
+            "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
+            "adversarial": {"provider": "xai-oauth", "model": "grok-4.6"},
+        }
+        self.config["review"].update(
+            deep_paths=["feature.txt"], reviewers=reviewers, commands=[]
+        )
+        self.write_config()
+
+        result = self.run_runner()
+        manifest = self.read_manifest()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(manifest["lane"], "deep")
+        self.assertEqual(manifest["required_reviewers"], reviewers)
+        self.assertEqual(manifest["reviewer_contract_version"], "1")
+
+    def test_blocks_deep_lane_without_required_reviewer_configuration(self):
+        """A deep lane cannot proceed without its two-reviewer contract."""
+        self.config["review"].update(deep_paths=["feature.txt"], commands=[])
+        self.write_config()
+
+        result = self.run_runner()
+        manifest = self.read_manifest()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(manifest["status"], "blocked")
+        self.assertIn("missing required reviewer configuration", manifest["evidence_gaps"])
+        self.assertIsNone(manifest["required_reviewers"])
+        self.assertEqual(manifest["reviewer_contract_version"], "1")
+
+    def test_rejects_invalid_reviewer_contracts_before_writing_manifest(self):
+        """Malformed reviewer contracts fail closed before generating evidence."""
+        cases = [
+            ("non-object reviewers", lambda config: config["review"].update(reviewers=[])),
+            ("missing reviewer role", lambda config: config["review"].update(reviewers={
+                "primary": {"provider": "anthropic", "model": "claude-opus-4-6"}
+            })),
+            ("non-object reviewer", lambda config: config["review"].update(reviewers={
+                "primary": [],
+                "adversarial": {"provider": "xai-oauth", "model": "grok-4.6"},
+            })),
+            ("blank provider", lambda config: config["review"].update(reviewers={
+                "primary": {"provider": " ", "model": "claude-opus-4-6"},
+                "adversarial": {"provider": "xai-oauth", "model": "grok-4.6"},
+            })),
+            ("blank model", lambda config: config["review"].update(reviewers={
+                "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
+                "adversarial": {"provider": "xai-oauth", "model": " "},
+            })),
+            ("unknown reviewer field", lambda config: config["review"].update(reviewers={
+                "primary": {"provider": "anthropic", "model": "claude-opus-4-6", "extra": True},
+                "adversarial": {"provider": "xai-oauth", "model": "grok-4.6"},
+            })),
+        ]
+        original_config = copy.deepcopy(self.config)
+        for label, mutate in cases:
+            with self.subTest(label=label):
+                self.config = copy.deepcopy(original_config)
+                mutate(self.config)
+                self.write_config()
+
+                result = self.run_runner()
+
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(list(self.manifest_root.rglob("*.json")))
 
     def test_rejects_invalid_nested_configuration(self):
         """Exercise the Steward review gate behavior."""

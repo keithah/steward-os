@@ -24,6 +24,8 @@ _ORIGIN_PATTERNS = (
     re.compile(r"ssh://git@github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?"),
 )
 _CAPTURE_LIMIT = 16_384
+REVIEWER_ROLES = ("primary", "adversarial")
+REVIEWER_CONTRACT_VERSION = "1"
 
 
 def _require_keys(value, allowed, required, label):
@@ -53,6 +55,26 @@ def _require_string_list(value, label):
         raise ReviewError(f"{label} must be a list")
     for index, item in enumerate(value):
         _require_nonblank_string(item, f"{label}[{index}]")
+
+
+def validate_reviewers(review: dict) -> dict:
+    """Validate the required reviewer roles when a contract is configured."""
+    reviewers = review["reviewers"]
+    _require_keys(reviewers, set(REVIEWER_ROLES), set(REVIEWER_ROLES), "review.reviewers")
+    for role in REVIEWER_ROLES:
+        _require_keys(
+            reviewers[role],
+            {"provider", "model"},
+            {"provider", "model"},
+            f"review.reviewers.{role}",
+        )
+        _require_nonblank_string(
+            reviewers[role]["provider"], f"review.reviewers.{role}.provider"
+        )
+        _require_nonblank_string(
+            reviewers[role]["model"], f"review.reviewers.{role}.model"
+        )
+    return reviewers
 
 
 def _is_inside(path, directory):
@@ -219,13 +241,17 @@ def load_config(path: Path, repo_dir: Path) -> dict:
         "sensitive_paths",
         "visual_paths",
         "deep_paths",
+        "reviewers",
         "execute_contributor_code",
         "sandbox_available",
         "command_timeout_seconds",
         "safe_commands_execute_reviewed_code",
         "commands",
     }
-    _require_keys(review, review_keys, review_keys, "review")
+    required_review_keys = review_keys - {"reviewers"}
+    _require_keys(review, review_keys, required_review_keys, "review")
+    if "reviewers" in review:
+        validate_reviewers(review)
     for name in ("sensitive_paths", "visual_paths", "deep_paths"):
         _require_string_list(review[name], f"review.{name}")
     for name in (
@@ -514,18 +540,25 @@ def main() -> int:
         manifest = git_state(repo_dir, config["repository"]["base_ref"])
         if config_source == "builtin-default":
             _prepare_builtin_state_root(repo_dir)
+        lane = select_lane(manifest["changed_paths"], config["review"])
+        required_reviewers = config["review"].get("reviewers")
+        evidence_gaps = (
+            ["no repository-specific review configuration"]
+            if config_source == "builtin-default"
+            else []
+        )
+        if lane in {"deep", "visual"} and required_reviewers is None:
+            evidence_gaps.append("missing required reviewer configuration")
         manifest.update(
             {
                 "base_ref": config["repository"]["base_ref"],
                 "config_revision": _config_revision(config),
                 "config_source": config_source,
                 "status": "ready",
-                "lane": select_lane(manifest["changed_paths"], config["review"]),
-                "evidence_gaps": (
-                    ["no repository-specific review configuration"]
-                    if config_source == "builtin-default"
-                    else []
-                ),
+                "lane": lane,
+                "required_reviewers": required_reviewers,
+                "reviewer_contract_version": REVIEWER_CONTRACT_VERSION,
+                "evidence_gaps": evidence_gaps,
             }
         )
         manifest["commands"], manifest["skipped_checks"] = run_commands(
