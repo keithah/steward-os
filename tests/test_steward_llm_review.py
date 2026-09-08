@@ -80,6 +80,7 @@ class StewardLlmReviewTests(unittest.TestCase):
             }
             behavior = os.environ["FAKE_HERMES_BEHAVIOR"]
             if behavior == "reviewer-fails" and role == "primary":
+                print("KNOWN_REVIEWER_STDERR_MARKER", file=sys.stderr)
                 raise SystemExit(9)
             if behavior == "writes-valid-primary-only" and role == "adversarial":
                 raise SystemExit(0)
@@ -374,11 +375,12 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertIn("role mismatch", result.stderr)
         self.assertFalse(list(self.report_root.rglob("*.json")))
 
-    def test_rejects_nonzero_reviewer_exit(self):
+    def test_rejects_nonzero_reviewer_exit_with_bounded_stderr_diagnostic(self):
         result = self.run_orchestrator("reviewer-fails")
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("primary reviewer failed", result.stderr)
+        self.assertIn("KNOWN_REVIEWER_STDERR_MARKER", result.stderr)
         self.assertFalse(list(self.report_root.rglob("*.json")))
 
     def test_rejects_missing_report_root(self):

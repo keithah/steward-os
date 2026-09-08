@@ -18,6 +18,7 @@ _ROLES = ("primary", "adversarial")
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _MAX_PROMPT_DIFF_BYTES = 256 * 1024
+_MAX_REVIEWER_STDERR_BYTES = 1024
 _INSTRUCTION_FILE_NAMES = ("AGENTS.md", "SOUL.md", ".cursorrules", ".hermes.md", "CLAUDE.md")
 _INSTRUCTION_DIFF_EXCLUSIONS = tuple(
     pathspec
@@ -377,6 +378,13 @@ def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> d
             capture_output=True,
         )
         if completed.returncode:
+            diagnostic = (
+                completed.stderr.encode("utf-8")[-_MAX_REVIEWER_STDERR_BYTES:]
+                .decode("utf-8", errors="replace")
+                .strip()
+            )
+            if diagnostic:
+                raise ReviewError(f"{role} reviewer failed: {diagnostic}")
             raise ReviewError(f"{role} reviewer failed")
         artifact = parse_only_json(completed.stdout, role)
         validate_artifact(artifact, role, reviewer, context)
