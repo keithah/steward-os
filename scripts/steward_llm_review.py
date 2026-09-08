@@ -18,6 +18,24 @@ _ROLES = ("primary", "adversarial")
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _MAX_PROMPT_DIFF_BYTES = 256 * 1024
+_ROLE_PROBES = {
+    "primary": (
+        "full changed-file/caller/test inspection",
+        "public contract and compatibility paths",
+        "malformed/omitted/negative/timezone inputs",
+        "error propagation",
+    ),
+    "adversarial": (
+        "policy at effectful sinks",
+        "token/output/redirect boundaries",
+        "cancellation and partial-success compensation",
+        "all writers and shared locks",
+        "pagination snapshots and changed totals",
+        "ordering/deduplication",
+        "ambient credentials and caller-widenable authorization",
+        "process cleanup and status propagation",
+    ),
+}
 _ARTIFACT_KEYS = {
     "repository",
     "head_sha",
@@ -44,6 +62,13 @@ def _inside(path: Path, directory: Path) -> bool:
 
 def _require_string(value, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
+        raise ReviewError(f"{label} missing or invalid")
+    return value
+
+
+def _require_normalized_string(value, label: str) -> str:
+    value = _require_string(value, label)
+    if value != value.strip():
         raise ReviewError(f"{label} missing or invalid")
     return value
 
@@ -135,7 +160,14 @@ def _prompt(role: str, context: dict) -> str:
                 "Emit exactly one JSON object and no markdown or prose. Its exact keys must be: "
                 "repository, head_sha, base_sha, merge_base_sha, config_revision, role, provider, "
                 "model, status, findings, probes, limitations. The provider and model must be the "
-                "requested values. Bind the object to the supplied bindings."
+                "requested values. Bind the object to the supplied bindings. Every finding must be "
+                "an object with a nonblank normalized string probe_id. Every probes entry must be "
+                "an object with exactly probe_id, status, and evidence fields, each a nonblank "
+                "normalized string; status must be passed, not-applicable, or finding. If findings "
+                "is empty, probes must record applicable checklist outcomes. Review every item in "
+                "this role-specific checklist: "
+                + "; ".join(_ROLE_PROBES[role])
+                + "."
             ),
             "bindings": bindings,
             "diff": context["diff"],
@@ -215,6 +247,20 @@ def validate_artifact(artifact: dict, role: str, reviewer: dict, context: dict) 
     for key in ("findings", "probes", "limitations"):
         if not isinstance(artifact[key], list):
             raise ReviewError(f"{key} must be a list")
+    for finding in artifact["findings"]:
+        if not isinstance(finding, dict):
+            raise ReviewError("finding must be an object")
+        _require_normalized_string(finding.get("probe_id"), "finding probe_id")
+    for probe in artifact["probes"]:
+        if not isinstance(probe, dict) or set(probe) != {"probe_id", "status", "evidence"}:
+            raise ReviewError("probe schema mismatch")
+        _require_normalized_string(probe["probe_id"], "probe probe_id")
+        status = _require_normalized_string(probe["status"], "probe status")
+        if status not in {"passed", "not-applicable", "finding"}:
+            raise ReviewError("probe status invalid")
+        _require_normalized_string(probe["evidence"], "probe evidence")
+    if not artifact["findings"] and not artifact["probes"]:
+        raise ReviewError("probes required when findings is empty")
 
 
 def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> dict:

@@ -78,8 +78,12 @@ class StewardLlmReviewTests(unittest.TestCase):
                 "provider": f"{role}-provider",
                 "model": f"{role}-model",
                 "status": "complete",
-                "findings": [],
-                "probes": [],
+                "findings": [{"probe_id": f"{role}-probe"}],
+                "probes": [{
+                    "probe_id": f"{role}-probe",
+                    "status": "finding",
+                    "evidence": "fake reviewer evidence",
+                }],
                 "limitations": [],
             }
             if behavior == "writes-fallback-model" and role == "primary":
@@ -88,6 +92,11 @@ class StewardLlmReviewTests(unittest.TestCase):
                 artifact["head_sha"] = "e" * 40
             if behavior == "writes-mismatched-role" and role == "primary":
                 artifact["role"] = "adversarial"
+            if behavior == "writes-blank-finding-probe" and role == "primary":
+                artifact["findings"] = [{"probe_id": ""}]
+            if behavior == "writes-empty-review-evidence" and role == "primary":
+                artifact["findings"] = []
+                artifact["probes"] = []
             print(json.dumps(artifact))
         """).replace("__PYTHON__", sys.executable).replace(
             "__HEAD_SHA__", self.head_sha
@@ -299,6 +308,32 @@ class StewardLlmReviewTests(unittest.TestCase):
             self.assertEqual(args[args.index("--model") + 1], f"{role}-model")
             self.assertIn("Make no GitHub writes", invocation["prompt"])
             self.assertIn("Do not execute reviewed code", invocation["prompt"])
+
+    def test_private_prompts_contain_only_their_role_specific_probe_contracts(self):
+        result = self.run_orchestrator()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        invocations = [json.loads(line) for line in self.hermes_log.read_text().splitlines()]
+        primary_prompt = invocations[0]["prompt"]
+        adversarial_prompt = invocations[1]["prompt"]
+        self.assertIn("full changed-file/caller/test inspection", primary_prompt)
+        self.assertNotIn("policy at effectful sinks", primary_prompt)
+        self.assertIn("policy at effectful sinks", adversarial_prompt)
+        self.assertIn("ambient credentials and caller-widenable authorization", adversarial_prompt)
+
+    def test_rejects_blank_finding_probe_id(self):
+        result = self.run_orchestrator("writes-blank-finding-probe")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("finding probe_id", result.stderr)
+        self.assertFalse(list(self.report_root.rglob("*.json")))
+
+    def test_rejects_empty_findings_without_probe_outcomes(self):
+        result = self.run_orchestrator("writes-empty-review-evidence")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("probes", result.stderr)
+        self.assertFalse(list(self.report_root.rglob("*.json")))
 
     def test_reviewer_isolated_from_checkout_and_receives_only_committed_diff(self):
         """The model gets a host-generated committed diff from a private cwd."""
