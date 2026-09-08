@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -19,6 +20,9 @@ _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _MAX_PROMPT_DIFF_BYTES = 256 * 1024
 _MAX_REVIEWER_STDERR_BYTES = 1024
+_REVIEWER_TIMEOUT_SECONDS = 120
+_MAX_FINDINGS = 64
+_MAX_LIMITATIONS = 32
 _INSTRUCTION_FILE_NAMES = ("AGENTS.md", "SOUL.md", ".cursorrules", ".hermes.md", "CLAUDE.md")
 _INSTRUCTION_DIFF_EXCLUSIONS = tuple(
     pathspec
@@ -320,11 +324,19 @@ def validate_artifact(artifact: dict, role: str, reviewer: dict, context: dict) 
     for key in ("findings", "probes", "limitations"):
         if not isinstance(artifact[key], list):
             raise ReviewError(f"{key} must be a list")
+    if len(artifact["findings"]) > _MAX_FINDINGS:
+        raise ReviewError("findings exceeds limit")
+    if len(artifact["probes"]) > len(_ROLE_PROBES[role]):
+        raise ReviewError("probes exceeds limit")
+    if len(artifact["limitations"]) > _MAX_LIMITATIONS:
+        raise ReviewError("limitations exceeds limit")
+    for limitation in artifact["limitations"]:
+        _require_normalized_string(limitation, "limitation")
     valid_probe_ids = {probe_id for probe_id, _ in _ROLE_PROBES[role]}
     for finding in artifact["findings"]:
-        if not isinstance(finding, dict):
-            raise ReviewError("finding must be an object")
-        finding_probe_id = _require_normalized_string(finding.get("probe_id"), "finding probe_id")
+        if not isinstance(finding, dict) or set(finding) != {"probe_id"}:
+            raise ReviewError("finding schema mismatch")
+        finding_probe_id = _require_normalized_string(finding["probe_id"], "finding probe_id")
         if finding_probe_id not in valid_probe_ids:
             raise ReviewError("finding probe_id invalid")
     probe_ids = set()
@@ -341,8 +353,18 @@ def validate_artifact(artifact: dict, role: str, reviewer: dict, context: dict) 
         if status not in {"passed", "not-applicable", "finding"}:
             raise ReviewError("probe status invalid")
         _require_normalized_string(probe["evidence"], "probe evidence")
-    if not artifact["findings"] and probe_ids != valid_probe_ids:
-        raise ReviewError("complete role probes coverage required when findings is empty")
+    if probe_ids != valid_probe_ids:
+        raise ReviewError("complete role probes coverage required")
+    finding_probe_ids = {
+        _require_normalized_string(finding["probe_id"], "finding probe_id")
+        for finding in artifact["findings"]
+    }
+    if any(
+        probe["status"] != "finding" or probe["probe_id"] not in finding_probe_ids
+        for probe in artifact["probes"]
+        if probe["probe_id"] in finding_probe_ids
+    ):
+        raise ReviewError("finding probe outcome required")
 
 
 def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> dict:
@@ -376,6 +398,7 @@ def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> d
             cwd=prompt_dir,
             text=True,
             capture_output=True,
+            timeout=_REVIEWER_TIMEOUT_SECONDS,
         )
         if completed.returncode:
             diagnostic = (
@@ -389,11 +412,12 @@ def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> d
         artifact = parse_only_json(completed.stdout, role)
         validate_artifact(artifact, role, reviewer, context)
         return artifact
+    except subprocess.TimeoutExpired as error:
+        raise ReviewError(f"{role} reviewer timed out") from error
     except OSError as error:
         raise ReviewError(f"{role} reviewer failed: {error}") from error
     finally:
-        prompt_path.unlink(missing_ok=True)
-        prompt_dir.rmdir()
+        shutil.rmtree(prompt_dir, ignore_errors=True)
 
 
 def _artifact_path(context: dict, role: str) -> Path:
@@ -412,6 +436,7 @@ def persist_artifacts(context: dict, artifacts: dict) -> list[Path]:
     for destination in destinations.values():
         destination.parent.mkdir(parents=True, exist_ok=True)
     temporary_paths = []
+    published_paths = []
     try:
         for role, destination in destinations.items():
             descriptor, temporary_name = tempfile.mkstemp(
@@ -424,8 +449,14 @@ def persist_artifacts(context: dict, artifacts: dict) -> list[Path]:
                 json.dump(artifacts[role], temporary_file, sort_keys=True)
                 temporary_file.write("\n")
             temporary_path.replace(destination)
+            published_paths.append(destination)
         return list(destinations.values())
     except OSError as error:
+        for published_path in published_paths:
+            try:
+                published_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         raise ReviewError(f"cannot persist artifacts: {error}") from error
     finally:
         for temporary_path in temporary_paths:

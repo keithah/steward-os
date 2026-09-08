@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 import stat
@@ -6,6 +7,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -18,6 +20,10 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.report_root = self.root / "reports"
         self.manifest_path = self.root / "manifest.json"
         self.runner = Path(__file__).resolve().parents[1] / "scripts" / "steward_llm_review.py"
+        module_spec = importlib.util.spec_from_file_location("steward_llm_review", self.runner)
+        assert module_spec and module_spec.loader
+        self.review_module = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(self.review_module)
         self.head_sha = "a" * 40
         self.base_sha = "b" * 40
         self.merge_base_sha = "c" * 40
@@ -103,10 +109,10 @@ class StewardLlmReviewTests(unittest.TestCase):
                 "status": "complete",
                 "findings": [{"probe_id": role_probes[role][0]}],
                 "probes": [{
-                    "probe_id": role_probes[role][0],
-                    "status": "finding",
+                    "probe_id": probe_id,
+                    "status": "finding" if probe_id == role_probes[role][0] else "passed",
                     "evidence": "fake reviewer evidence",
-                }],
+                } for probe_id in role_probes[role]],
                 "limitations": [],
             }
             if behavior == "writes-fallback-model" and role == "primary":
@@ -134,6 +140,19 @@ class StewardLlmReviewTests(unittest.TestCase):
                     "status": "passed",
                     "evidence": "complete clean probe",
                 } for probe_id in role_probes[role]]
+            if behavior == "writes-incomplete-findings" and role == "primary":
+                artifact["findings"] = [{"probe_id": role_probes[role][0]}]
+                artifact["probes"] = [{
+                    "probe_id": role_probes[role][0],
+                    "status": "finding",
+                    "evidence": "only one finding probe",
+                }]
+            if behavior == "writes-extra-finding-field" and role == "primary":
+                artifact["findings"] = [{
+                    "probe_id": role_probes[role][0], "untrusted": "extra field",
+                }]
+            if behavior == "writes-private-cwd-file":
+                Path("reviewer-private-state").write_text("child state")
             print(json.dumps(artifact))
         """).replace("__PYTHON__", sys.executable).replace(
             "__HEAD_SHA__", self.head_sha
@@ -404,6 +423,27 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertIn("report_root must be outside reviewed checkout", result.stderr)
         self.assertFalse(self.hermes_log.exists())
 
+    def test_removes_first_artifact_when_second_persist_fails(self):
+        context = {
+            "report_root": self.report_root,
+            "repository": "acme/widget",
+            "branch": "feature/exact-state",
+            "head_sha": self.head_sha,
+        }
+        artifacts = {role: {"role": role} for role in ("primary", "adversarial")}
+        original_replace = Path.replace
+
+        def fail_second_replace(path, destination):
+            if path.name.startswith(".adversarial."):
+                raise OSError("forced second persist failure")
+            return original_replace(path, destination)
+
+        with mock.patch.object(Path, "replace", fail_second_replace):
+            with self.assertRaisesRegex(self.review_module.ReviewError, "cannot persist artifacts"):
+                self.review_module.persist_artifacts(context, artifacts)
+
+        self.assertFalse(list(self.report_root.rglob("*.json")))
+
     def test_persists_valid_primary_and_adversarial_artifacts_atomically(self):
         result = self.run_orchestrator()
 
@@ -436,6 +476,15 @@ class StewardLlmReviewTests(unittest.TestCase):
             self.assertIn("Make no GitHub writes", invocation["prompt"])
             self.assertIn("Do not execute reviewed code", invocation["prompt"])
 
+    def test_removes_reviewer_private_cwd_files_after_successful_review(self):
+        result = self.run_orchestrator("writes-private-cwd-file")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            {path.name for path in self.report_root.rglob("*.json")},
+            {"primary.json", "adversarial.json"},
+        )
+
     def test_private_prompts_contain_only_their_role_specific_probe_contracts(self):
         result = self.run_orchestrator()
 
@@ -455,6 +504,13 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertIn("finding probe_id", result.stderr)
         self.assertFalse(list(self.report_root.rglob("*.json")))
 
+    def test_rejects_finding_with_undeclared_field(self):
+        result = self.run_orchestrator("writes-extra-finding-field")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("finding schema", result.stderr)
+        self.assertFalse(list(self.report_root.rglob("*.json")))
+
     def test_rejects_empty_findings_without_probe_outcomes(self):
         result = self.run_orchestrator("writes-empty-review-evidence")
 
@@ -464,6 +520,13 @@ class StewardLlmReviewTests(unittest.TestCase):
 
     def test_rejects_incomplete_clean_probe_coverage_before_persisting_artifacts(self):
         result = self.run_orchestrator("writes-incomplete-clean")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("complete", result.stderr)
+        self.assertFalse(list(self.report_root.rglob("*.json")))
+
+    def test_rejects_incomplete_finding_probe_coverage_before_persisting_artifacts(self):
+        result = self.run_orchestrator("writes-incomplete-findings")
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("complete", result.stderr)
