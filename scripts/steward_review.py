@@ -521,14 +521,23 @@ def main() -> int:
                 "config_source": config_source,
                 "status": "ready",
                 "lane": select_lane(manifest["changed_paths"], config["review"]),
+                "evidence_gaps": (
+                    ["no repository-specific review configuration"]
+                    if config_source == "builtin-default"
+                    else []
+                ),
             }
         )
         manifest["commands"], manifest["skipped_checks"] = run_commands(
             repo_dir, config["review"]
         )
+        manifest["evidence_gaps"].extend(
+            f"{check['id']}: {check['reason']}" for check in manifest["skipped_checks"]
+        )
         manifest["post_command_state"] = post_command_state(repo_dir, manifest)
         if (
-            any(command["status"] == "failed" for command in manifest["commands"])
+            manifest["evidence_gaps"]
+            or any(command["status"] == "failed" for command in manifest["commands"])
             or manifest["post_command_state"]["status"] == "failed"
         ):
             manifest["status"] = "blocked"
