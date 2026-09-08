@@ -13,6 +13,35 @@ Use this procedure only for a clean, committed branch. It creates local review e
 - Runner commands are trusted operator configured deterministic commands. Do not treat contributor-authored commands as trusted.
 - Host `safe` commands may not execute or import reviewed-checkout code; configurations must declare `safe_commands_execute_reviewed_code: true` for that case, which this runner rejects until a locked-down sandbox runtime is integrated. `sandbox` commands are likewise unsupported: with either sandbox flag false they are skipped; with both flags true the configuration is rejected rather than running on the host.
 - For this procedure, do not create or alter any GitHub object: no PRs, comments, reviews, approvals, labels, merges, pushes, releases, deployments, or settings changes.
+- This public skill is read-only: do not execute, import, build, test, or otherwise run reviewed-checkout code. Do not write to the reviewed checkout.
+
+## Review contracts
+
+### Primary review checklist
+
+Record evidence for each applicable item:
+
+- full changed-file/caller/test inspection;
+- public contract and compatibility paths;
+- malformed/omitted/negative/timezone inputs; and
+- error propagation.
+
+### Adversarial review checklist
+
+For `deep` and `visual` lanes, independently test these hypotheses against the inspected evidence:
+
+- policy at effectful sinks;
+- token/output/redirect boundaries;
+- cancellation and partial-success compensation;
+- all writers and shared locks;
+- pagination snapshots and changed totals;
+- ordering/deduplication;
+- ambient credentials and caller-widenable authorization; and
+- process cleanup and status propagation.
+
+## Structured findings
+
+Use stable, normalized `probe_id` values for findings. Each applicable probe records its identifier, status, exact local evidence reference, and concise impact. An empty findings list is allowed only after every applicable probe is recorded as passed/not-applicable with evidence in the local report.
 
 ## Procedure
 
