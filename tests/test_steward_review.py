@@ -650,7 +650,7 @@ class StewardReviewTests(unittest.TestCase):
         reference_required = [
             "two exact-SHA artifacts",
             "`anthropic`/`claude-opus-4-6`",
-            "`xai-oauth`/`grok-4.6`",
+            "`anthropic`/`claude-sonnet-4-6`",
             "private-only prompt, transcript, and artifact state",
             "no fallback acceptance",
             "no GitHub writes or reviewed-code execution",
@@ -680,7 +680,7 @@ class StewardReviewTests(unittest.TestCase):
             reviewers,
             {
                 "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
-                "adversarial": {"provider": "xai-oauth", "model": "grok-4.6"},
+                "adversarial": {"provider": "anthropic", "model": "claude-sonnet-4-6"},
             },
         )
 
