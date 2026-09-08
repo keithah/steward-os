@@ -18,6 +18,12 @@ _ROLES = ("primary", "adversarial")
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _MAX_PROMPT_DIFF_BYTES = 256 * 1024
+_INSTRUCTION_FILE_NAMES = ("AGENTS.md", "SOUL.md", ".cursorrules", ".hermes.md", "CLAUDE.md")
+_INSTRUCTION_DIFF_EXCLUSIONS = tuple(
+    pathspec
+    for name in _INSTRUCTION_FILE_NAMES
+    for pathspec in (f":(exclude,literal){name}", f":(exclude,glob)**/{name}")
+)
 _TIRITH_UNAVAILABLE_DIAGNOSTIC = (
     "  ⚠ tirith security scanner enabled but not available "
     "— command scanning will use pattern matching only\n"
@@ -210,6 +216,8 @@ def committed_diff(context: dict) -> str:
                 "--no-textconv",
                 "--unified=80",
                 f"{context['base_sha']}...{context['head_sha']}",
+                "--",
+                *_INSTRUCTION_DIFF_EXCLUSIONS,
             ],
             cwd=context["repo_dir"],
             text=True,

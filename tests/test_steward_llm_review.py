@@ -438,6 +438,54 @@ class StewardLlmReviewTests(unittest.TestCase):
             self.assertNotIn("AGENTS.md", invocation["prompt"])
             self.assertNotIn("uncommitted.txt", invocation["prompt"])
 
+    def test_reviewer_diff_excludes_committed_root_and_nested_instruction_files(self):
+        """Committed instruction files never reach either reviewer prompt."""
+        instruction_files = {
+            "AGENTS.md": "root agents instruction secret\n",
+            "nested/SOUL.md": "nested soul instruction secret\n",
+            "rules/.cursorrules": "nested cursor instruction secret\n",
+            "config/.hermes.md": "nested hermes instruction secret\n",
+            "guidance/CLAUDE.md": "nested claude instruction secret\n",
+        }
+        for name, content in instruction_files.items():
+            path = self.repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        (self.repo / "normal-change.txt").write_text("ordinary committed change\n")
+        subprocess.run(["git", "add", "."], cwd=self.repo, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "add reviewer inputs"],
+            cwd=self.repo,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        previous_head_sha = self.manifest["head_sha"]
+        self.manifest["head_sha"] = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self.repo,
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout.strip()
+        self.fake_hermes.write_text(
+            self.fake_hermes.read_text().replace(previous_head_sha, self.manifest["head_sha"])
+        )
+        self.write_manifest()
+
+        result = self.run_orchestrator()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        invocations = [json.loads(line) for line in self.hermes_log.read_text().splitlines()]
+        self.assertEqual(len(invocations), 2)
+        for invocation in invocations:
+            prompt = invocation["prompt"]
+            self.assertIn("normal-change.txt", prompt)
+            self.assertIn("ordinary committed change", prompt)
+            for name, content in instruction_files.items():
+                self.assertNotIn(name, prompt)
+                self.assertNotIn(content.strip(), prompt)
+
     def test_rejects_diff_over_prompt_limit_before_invoking_hermes(self):
         """Oversized committed diffs fail closed before any reviewer process starts."""
         oversized = self.repo / "oversized.txt"
