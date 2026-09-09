@@ -15,13 +15,23 @@
     ],
     "reviewers": {
       "primary": {
-        "provider": "anthropic",
-        "model": "claude-opus-4-6"
-      },
-      "adversarial": {
         "provider": "openai-codex",
-        "model": "gpt-5.6-terra"
-      }
+        "model": "gpt-6-astra"
+      },
+      "adversarial_candidates": [
+        {
+          "provider": "anthropic",
+          "model": "claude-opus-4-6"
+        },
+        {
+          "provider": "xai-oauth",
+          "model": "grok-4.6"
+        },
+        {
+          "provider": "opencode-zen",
+          "model": "muse-spark-1.3-contributor-free"
+        }
+      ]
     },
     "execute_contributor_code": false,
     "sandbox_available": false,

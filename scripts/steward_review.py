@@ -26,6 +26,7 @@ _ORIGIN_PATTERNS = (
 )
 _CAPTURE_LIMIT = 16_384
 REVIEWER_ROLES = ("primary", "adversarial")
+REVIEWER_POLICY_KEYS = ("primary", "adversarial_candidates")
 LANE_REVIEWER_ROLES = {
     "fast": ("primary",),
     "deep": REVIEWER_ROLES,
@@ -66,8 +67,13 @@ def _require_string_list(value, label):
 def validate_reviewers(review: dict) -> dict:
     """Validate the required reviewer roles when a contract is configured."""
     reviewers = review["reviewers"]
-    _require_keys(reviewers, set(REVIEWER_ROLES), set(REVIEWER_ROLES), "review.reviewers")
-    for role in REVIEWER_ROLES:
+    _require_keys(
+        reviewers,
+        set(REVIEWER_POLICY_KEYS),
+        set(REVIEWER_POLICY_KEYS),
+        "review.reviewers",
+    )
+    for role in ("primary",):
         _require_keys(
             reviewers[role],
             {"provider", "model"},
@@ -80,6 +86,14 @@ def validate_reviewers(review: dict) -> dict:
         _require_nonblank_string(
             reviewers[role]["model"], f"review.reviewers.{role}.model"
         )
+    candidates = reviewers["adversarial_candidates"]
+    if not isinstance(candidates, list) or not candidates:
+        raise ReviewError("review.reviewers.adversarial_candidates must be a non-empty list")
+    for index, candidate in enumerate(candidates):
+        label = f"review.reviewers.adversarial_candidates[{index}]"
+        _require_keys(candidate, {"provider", "model"}, {"provider", "model"}, label)
+        _require_nonblank_string(candidate["provider"], f"{label}.provider")
+        _require_nonblank_string(candidate["model"], f"{label}.model")
     return reviewers
 
 
@@ -447,11 +461,15 @@ def _global_policy_config(policy_root: Path, repo_dir: Path) -> dict:
     validated = load_config(policy_path, repo_dir, config=config)
     review = validated["review"]
     expected_reviewers = {
-        "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
-        "adversarial": {"provider": "openai-codex", "model": "gpt-5.6-terra"},
+        "primary": {"provider": "openai-codex", "model": "gpt-6-astra"},
+        "adversarial_candidates": [
+            {"provider": "anthropic", "model": "claude-opus-4-6"},
+            {"provider": "xai-oauth", "model": "grok-4.6"},
+            {"provider": "opencode-zen", "model": "muse-spark-1.3-contributor-free"},
+        ],
     }
     if review.get("reviewers") != expected_reviewers:
-        raise ReviewError("global policy reviewers must pin Opus primary and GPT Terra adversarial")
+        raise ReviewError("global policy reviewers must pin Astra primary and the approved secondary order")
     if review["commands"]:
         raise ReviewError("global policy must not configure commands")
     if (
@@ -536,7 +554,10 @@ def required_reviewer_contracts(lane: str, review: dict) -> Optional[dict]:
     reviewers = review.get("reviewers")
     if reviewers is None:
         return None
-    return {role: reviewers[role] for role in LANE_REVIEWER_ROLES[lane]}
+    contracts = {"primary": reviewers["primary"]}
+    if lane != "fast":
+        contracts["adversarial_candidates"] = reviewers["adversarial_candidates"]
+    return contracts
 
 
 def _bounded_text(value: str) -> tuple[str, bool]:

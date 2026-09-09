@@ -18,7 +18,7 @@ Keep this repository public-safe. Store live policy, manifests, reports, credent
 4. Optionally add `overrides/owner__repository.json` under the same private root using [`setup/hermes-review-config.example.json`](../../setup/hermes-review-config.example.json). An override may contain only `base_ref` and lane path lists; it cannot replace repository identity, state roots, reviewers, execution flags, or commands. Complete per-repository configuration is forbidden.
 5. Load [`skills/hermes-pr-review/SKILL.md`](../../skills/hermes-pr-review/SKILL.md) in Hermes for the review procedure.
 
-Reviewer provider/model identifiers are private operator policy, not credentials: the selected identities are primary `anthropic`/`claude-opus-4-6` and adversarial `openai-codex`/`gpt-5.6-terra`. No credential value belongs in JSON.
+Reviewer provider/model identifiers are private operator policy, not credentials: primary is ChatGPT OAuth `openai-codex`/`gpt-6-astra`. For deep and visual lanes, use the fail-closed ordered secondary candidates: Anthropic OAuth `anthropic`/`claude-opus-4-6`, then xAI OAuth `xai-oauth`/`grok-4.6`, then only free Zen `opencode-zen`/`muse-spark-1.3-contributor-free`. Paid models must never be routed through Zen. No credential value belongs in JSON.
 
 The private `policy.json` has this complete shape (the public path strings are placeholders, not usable host paths):
 
@@ -33,8 +33,12 @@ The private `policy.json` has this complete shape (the public path strings are p
     "visual_paths": ["web/**"],
     "deep_paths": ["src/**"],
     "reviewers": {
-      "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
-      "adversarial": {"provider": "openai-codex", "model": "gpt-5.6-terra"}
+      "primary": {"provider": "openai-codex", "model": "gpt-6-astra"},
+      "adversarial_candidates": [
+        {"provider": "anthropic", "model": "claude-opus-4-6"},
+        {"provider": "xai-oauth", "model": "grok-4.6"},
+        {"provider": "opencode-zen", "model": "muse-spark-1.3-contributor-free"}
+      ]
     },
     "execute_contributor_code": false,
     "sandbox_available": false,
@@ -72,7 +76,7 @@ It records the exact repository, branch, base ref, base SHA, merge-base SHA, hea
 - **deep:** a changed path matches a deep or sensitive pattern. Hermes performs the primary review plus a separate adversarial review.
 - **visual:** a changed path matches a visual pattern. Hermes performs the primary review plus a separate adversarial review, including visual evidence where available.
 
-The manifest producer selects the required lane role set from the configured dual-reviewer policy: a fast manifest requires exactly the configured primary role and publishes exactly one primary exact-SHA artifact. Every deep or visual manifest requires exactly the configured primary and adversarial roles and two exact-SHA artifacts bound to the same repository, configuration revision, base SHA, merge-base SHA, and head SHA. Missing, extra, or malformed role contracts are rejected for every lane. The artifact provider and model must exactly match the configured identity; there is no fallback acceptance.
+The manifest producer selects the required lane contract from the configured OAuth-first policy: a fast manifest binds exactly the configured Astra primary role and publishes exactly one primary exact-SHA artifact. Every deep or visual manifest binds that primary plus the ordered secondary candidate list and publishes two exact-SHA artifacts bound to the same repository, configuration revision, base SHA, merge-base SHA, and head SHA. The launcher tries candidates in order and accepts only the first valid adversarial artifact; its provider and model must exactly match the candidate actually selected. Missing, extra, malformed, reordered, or substituted contracts are rejected. The Zen candidate is exclusively the free Muse Spark 1.3 fallback; paid models never route through Zen.
 
 Hermes reads the manifest before reviewing. A `blocked` manifest stops the procedure. Before generating a committed diff, before launching either reviewer, between reviewer passes, and immediately before publication, it revalidates the checkout's normalized supported-GitHub `origin` repository plus its `HEAD`, configured base ref, merge base, and branch/detached binding against the manifest; any mismatch fails closed without further reviewer launch or artifact write. Each reviewer keeps private-only prompt, transcript, and artifact state outside the public checkout and GitHub. Review agents have no GitHub writes or reviewed-code execution; any future sandbox is the only boundary for executing reviewed code. The isolated reviewer receives only a bounded host-generated committed diff, manifest bindings, and its role-specific private checklist. The host excludes committed repository instruction/rule files named `AGENTS.md`, `SOUL.md`, `.cursorrules`, `.hermes.md`, and `CLAUDE.md` at the repository root and at every nested depth before sending that diff. Deterministic runner evidence remains in the manifest for the host/operator; the reviewer does not independently read repository instructions, checkout paths, or live PR checks/comments. The artifact requires structured probe outcomes with stable IDs: every role-specific checklist ID appears exactly once, findings contain only a declared `probe_id` and that probe's outcome is `finding`, and limitations are normalized bounded strings. Reviewer calls have a fixed 300-second (five-minute) bounded timeout; a timeout fails closed without retaining model stdout or private prompt content. Exact-SHA artifacts stage under one private `0700` transaction directory with owner-private `0600` files, then become consumer-visible only through one same-parent atomic directory rename. A pre-existing exact-SHA artifact directory is rejected; failed staging or publication is removed without exposing a partial lane artifact set.
 

@@ -38,11 +38,12 @@ class StewardLlmReviewTests(unittest.TestCase):
             "status": "ready",
             "report_root": str(self.report_root),
             "required_reviewers": {
-                "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
-                "adversarial": {
-                    "provider": "openai-codex",
-                    "model": "gpt-5.6-terra",
-                },
+                "primary": {"provider": "openai-codex", "model": "gpt-6-astra"},
+                "adversarial_candidates": [
+                    {"provider": "anthropic", "model": "claude-opus-4-6"},
+                    {"provider": "xai-oauth", "model": "grok-4.6"},
+                    {"provider": "opencode-zen", "model": "muse-spark-1.3-contributor-free"},
+                ],
             },
         }
         self.write_manifest()
@@ -102,6 +103,8 @@ class StewardLlmReviewTests(unittest.TestCase):
                 print("  ⚠ tirith security scanner enabled but not available — command scanning will use pattern matching only")
             if behavior == "writes-untrusted-prefix" and role == "primary":
                 print("untrusted diagnostic")
+            provider = args[args.index("--provider") + 1]
+            model = args[args.index("--model") + 1]
             artifact = {
                 "repository": "acme/widget",
                 "head_sha": "__HEAD_SHA__",
@@ -109,8 +112,8 @@ class StewardLlmReviewTests(unittest.TestCase):
                 "merge_base_sha": "__MERGE_BASE_SHA__",
                 "config_revision": "__CONFIG_REVISION__",
                 "role": role,
-                "provider": {"primary": "anthropic", "adversarial": "openai-codex"}[role],
-                "model": {"primary": "claude-opus-4-6", "adversarial": "gpt-5.6-terra"}[role],
+                "provider": provider,
+                "model": model,
                 "status": "complete",
                 "findings": [{"probe_id": role_probes[role][0]}],
                 "probes": [{
@@ -120,8 +123,12 @@ class StewardLlmReviewTests(unittest.TestCase):
                 } for probe_id in role_probes[role]],
                 "limitations": [],
             }
-            if behavior == "writes-fallback-model" and role == "primary":
-                artifact["model"] = "fallback-model"
+            if behavior == "fails-opus" and provider == "anthropic":
+                print("Opus unavailable", file=sys.stderr)
+                raise SystemExit(9)
+            if behavior == "writes-disallowed-candidate" and role == "adversarial":
+                artifact["provider"] = "untrusted"
+                artifact["model"] = "substituted"
             if behavior == "writes-mismatched-sha" and role == "primary":
                 artifact["head_sha"] = "e" * 40
             if behavior == "writes-mismatched-role" and role == "primary":
@@ -235,8 +242,12 @@ class StewardLlmReviewTests(unittest.TestCase):
                 "visual_paths": ["web/**"],
                 "deep_paths": ["feature.txt"] if lane == "deep" else [],
                 "reviewers": {
-                    "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
-                    "adversarial": {"provider": "openai-codex", "model": "gpt-5.6-terra"},
+                    "primary": {"provider": "openai-codex", "model": "gpt-6-astra"},
+                    "adversarial_candidates": [
+                        {"provider": "anthropic", "model": "claude-opus-4-6"},
+                        {"provider": "xai-oauth", "model": "grok-4.6"},
+                        {"provider": "opencode-zen", "model": "muse-spark-1.3-contributor-free"},
+                    ],
                 },
                 "execute_contributor_code": False,
                 "sandbox_available": False,
@@ -465,7 +476,7 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertEqual(len(invocations), 1)
         self.assertEqual(
             invocations[0]["args"][invocations[0]["args"].index("--provider") + 1],
-            "anthropic",
+            "openai-codex",
         )
 
     def test_accepts_fast_manifest_generated_by_the_review_runner(self):
@@ -485,7 +496,7 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertEqual(len(invocations), 1)
         self.assertEqual(
             invocations[0]["args"][invocations[0]["args"].index("--provider") + 1],
-            "anthropic",
+            "openai-codex",
         )
 
     def test_requires_both_primary_and_adversarial_artifacts(self):
@@ -495,12 +506,29 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertIn("adversarial artifact missing", result.stderr)
         self.assertFalse(list(self.report_root.rglob("*.json")))
 
-    def test_rejects_fallback_model_artifact(self):
-        result = self.run_orchestrator("writes-fallback-model")
+    def test_rejects_artifact_outside_permitted_secondary_candidates(self):
+        result = self.run_orchestrator("writes-disallowed-candidate")
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("model mismatch", result.stderr)
+        self.assertIn("secondary candidate mismatch", result.stderr)
         self.assertFalse(list(self.report_root.rglob("*.json")))
+
+    def test_falls_through_from_opus_to_grok_and_preserves_selected_artifact_identity(self):
+        result = self.run_orchestrator("fails-opus")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        invocations = [json.loads(line) for line in self.hermes_log.read_text().splitlines()]
+        selected = [
+            (entry["args"][entry["args"].index("--provider") + 1], entry["args"][entry["args"].index("--model") + 1])
+            for entry in invocations
+        ]
+        self.assertEqual(selected, [
+            ("openai-codex", "gpt-6-astra"),
+            ("anthropic", "claude-opus-4-6"),
+            ("xai-oauth", "grok-4.6"),
+        ])
+        artifact = json.loads(next(self.report_root.rglob("adversarial.json")).read_text())
+        self.assertEqual((artifact["provider"], artifact["model"]), ("xai-oauth", "grok-4.6"))
 
     def test_rejects_malformed_json_artifact(self):
         result = self.run_orchestrator("writes-malformed-json")
@@ -652,11 +680,11 @@ class StewardLlmReviewTests(unittest.TestCase):
                 self.assertIn(argument, args)
             self.assertEqual(
                 args[args.index("--provider") + 1],
-                {"primary": "anthropic", "adversarial": "openai-codex"}[role],
+                {"primary": "openai-codex", "adversarial": "anthropic"}[role],
             )
             self.assertEqual(
                 args[args.index("--model") + 1],
-                {"primary": "claude-opus-4-6", "adversarial": "gpt-5.6-terra"}[role],
+                {"primary": "gpt-6-astra", "adversarial": "claude-opus-4-6"}[role],
             )
             self.assertIn("Make no GitHub writes", invocation["prompt"])
             self.assertIn("Do not execute reviewed code", invocation["prompt"])

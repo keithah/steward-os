@@ -51,8 +51,12 @@ class StewardReviewTests(unittest.TestCase):
                 "visual_paths": ["web/**"],
                 "deep_paths": ["**"],
                 "reviewers": {
-                    "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
-                    "adversarial": {"provider": "openai-codex", "model": "gpt-5.6-terra"},
+                    "primary": {"provider": "openai-codex", "model": "gpt-6-astra"},
+                    "adversarial_candidates": [
+                        {"provider": "anthropic", "model": "claude-opus-4-6"},
+                        {"provider": "xai-oauth", "model": "grok-4.6"},
+                        {"provider": "opencode-zen", "model": "muse-spark-1.3-contributor-free"},
+                    ],
                 },
                 "execute_contributor_code": False,
                 "sandbox_available": False,
@@ -111,8 +115,12 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(second["repository"], "acme/other")
         self.assertEqual(first["config_source"], "private-global-policy")
         self.assertEqual(first["required_reviewers"], {
-            "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
-            "adversarial": {"provider": "openai-codex", "model": "gpt-5.6-terra"},
+            "primary": {"provider": "openai-codex", "model": "gpt-6-astra"},
+            "adversarial_candidates": [
+                {"provider": "anthropic", "model": "claude-opus-4-6"},
+                {"provider": "xai-oauth", "model": "grok-4.6"},
+                {"provider": "opencode-zen", "model": "muse-spark-1.3-contributor-free"},
+            ],
         })
 
     def test_no_policy_remains_blocked_diagnostic_baseline(self):
@@ -249,12 +257,17 @@ class StewardReviewTests(unittest.TestCase):
         self.assertIn("global policy contains unknown keys: repository", result.stderr)
         self.assertFalse((self.root / "global-manifests").exists())
 
-    def test_rejects_policy_without_pinned_dual_reviewer_identities(self):
+    def test_rejects_policy_without_pinned_oauth_primary_and_secondary_order(self):
         policy_root = self.policy_root()
-        self.write_policy(policy_root, mutate=lambda policy: policy["review"]["reviewers"]["adversarial"].update(model="grok-4.6"))
+        self.write_policy(
+            policy_root,
+            mutate=lambda policy: policy["review"]["reviewers"]["adversarial_candidates"].__setitem__(
+                0, {"provider": "xai-oauth", "model": "grok-4.6"}
+            ),
+        )
         result = self.run_runner(env=self.ready_env(policy_root))
         self.assertEqual(result.returncode, 1)
-        self.assertIn("global policy reviewers must pin Opus primary and GPT Terra adversarial", result.stderr)
+        self.assertIn("global policy reviewers must pin Astra primary and the approved secondary order", result.stderr)
 
     def test_rejects_malformed_global_policy_review_fields_before_manifest_write(self):
         policy_root = self.policy_root()

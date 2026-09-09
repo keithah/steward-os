@@ -227,14 +227,23 @@ def load_context(repo_dir: Path, manifest_path: Path, policy: dict) -> dict:
         raise ReviewError("lane invalid")
     roles = _LANE_ROLES[lane]
     reviewers = manifest.get("required_reviewers")
-    if not isinstance(reviewers, dict) or set(reviewers) != set(roles):
+    expected_keys = {"primary"} if lane == "fast" else {"primary", "adversarial_candidates"}
+    if not isinstance(reviewers, dict) or set(reviewers) != expected_keys:
         raise ReviewError("required_reviewers invalid")
-    for role in roles:
-        reviewer = reviewers[role]
-        if not isinstance(reviewer, dict) or set(reviewer) != {"provider", "model"}:
-            raise ReviewError(f"{role} reviewer contract invalid")
-        _require_string(reviewer["provider"], f"{role} provider")
-        _require_string(reviewer["model"], f"{role} model")
+    primary = reviewers["primary"]
+    if not isinstance(primary, dict) or set(primary) != {"provider", "model"}:
+        raise ReviewError("primary reviewer contract invalid")
+    _require_string(primary["provider"], "primary provider")
+    _require_string(primary["model"], "primary model")
+    if lane != "fast":
+        candidates = reviewers["adversarial_candidates"]
+        if not isinstance(candidates, list) or not candidates:
+            raise ReviewError("adversarial candidates invalid")
+        for index, candidate in enumerate(candidates):
+            if not isinstance(candidate, dict) or set(candidate) != {"provider", "model"}:
+                raise ReviewError("secondary candidate contract invalid")
+            _require_string(candidate["provider"], f"secondary candidate {index} provider")
+            _require_string(candidate["model"], f"secondary candidate {index} model")
 
     if repository != policy["repository"]:
         raise ReviewError("repository does not match active global policy")
@@ -493,6 +502,19 @@ def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> d
         shutil.rmtree(prompt_dir, ignore_errors=True)
 
 
+def run_secondary_reviewer(context: dict, hermes_bin: str) -> dict:
+    """Use the first ordered secondary candidate that returns a valid artifact."""
+    failures = []
+    for candidate in context["reviewers"]["adversarial_candidates"]:
+        try:
+            return run_reviewer("adversarial", candidate, context, hermes_bin)
+        except ReviewError as error:
+            failures.append(str(error))
+    if all(message in {"provider mismatch", "model mismatch"} for message in failures):
+        raise ReviewError("secondary candidate mismatch")
+    raise ReviewError("all secondary reviewer candidates failed: " + "; ".join(failures))
+
+
 def _artifact_path(context: dict, role: str) -> Path:
     owner, repository = context["repository"].split("/", 1)
     return (
@@ -556,7 +578,10 @@ def main() -> int:
         revalidate_context(context)
         artifacts = {}
         for role in context["roles"]:
-            artifacts[role] = run_reviewer(role, context["reviewers"][role], context, args.hermes_bin)
+            if role == "adversarial":
+                artifacts[role] = run_secondary_reviewer(context, args.hermes_bin)
+            else:
+                artifacts[role] = run_reviewer(role, context["reviewers"][role], context, args.hermes_bin)
             revalidate_context(context)
         for role in context["roles"]:
             if role not in artifacts:
