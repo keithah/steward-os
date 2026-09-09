@@ -124,6 +124,38 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(manifest["status"], "blocked")
         self.assertIn("no repository-specific review configuration", manifest["evidence_gaps"])
 
+    def test_default_builtin_state_root_rejects_lexical_symlinks_before_manifest_write(self):
+        for link_component in ("runtime", "steward-os"):
+            with self.subTest(link_component=link_component):
+                home = self.root / f"home-{link_component}"
+                state_parent = home / ".config"
+                state_parent.mkdir(mode=0o700, parents=True)
+                state_parent.chmod(0o700)
+                redirected_state = self.root / f"redirected-default-{link_component}"
+                redirected_state.mkdir(mode=0o700)
+                redirected_state.chmod(0o700)
+                if link_component == "runtime":
+                    state_root_parent = state_parent / "steward-os"
+                    state_root_parent.mkdir(mode=0o700)
+                    state_root_parent.chmod(0o700)
+                    (state_root_parent / "runtime").symlink_to(
+                        redirected_state, target_is_directory=True
+                    )
+                else:
+                    (state_parent / "steward-os").symlink_to(
+                        redirected_state, target_is_directory=True
+                    )
+
+                env = {**os.environ, "HOME": str(home)}
+                env.pop("STEWARD_STATE_ROOT", None)
+                result = self.run_runner(env=env)
+
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("built-in state root must not traverse a symlink", result.stderr)
+                self.assertFalse((redirected_state / "reports").exists())
+                self.assertFalse((redirected_state / "manifests").exists())
+
     def test_builtin_state_root_rejects_lexical_symlinks_before_manifest_write(self):
         redirected_state = self.root / "redirected-state"
         redirected_state.mkdir(mode=0o700)
