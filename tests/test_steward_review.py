@@ -179,6 +179,26 @@ class StewardReviewTests(unittest.TestCase):
         self.assertFalse((runtime / "reports").exists())
         self.assertFalse((runtime / "manifests").exists())
 
+    def test_custom_state_root_rejects_parent_symlink_when_target_contains_runtime(self):
+        redirected_state = self.root / "redirected-custom-existing-runtime"
+        redirected_state.mkdir(mode=0o700)
+        redirected_state.chmod(0o700)
+        runtime = redirected_state / "runtime"
+        runtime.mkdir(mode=0o700)
+        runtime.chmod(0o700)
+        state_link = self.root / "state-link"
+        state_link.symlink_to(redirected_state, target_is_directory=True)
+
+        result = self.run_runner(
+            env={**os.environ, "STEWARD_STATE_ROOT": str(state_link / "runtime")}
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "built-in state root must not traverse a symlink\n")
+        self.assertFalse((runtime / "reports").exists())
+        self.assertFalse((runtime / "manifests").exists())
+
     def test_builtin_state_root_rejects_lexical_symlinks_before_manifest_write(self):
         redirected_state = self.root / "redirected-state"
         redirected_state.mkdir(mode=0o700)
