@@ -261,6 +261,31 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
             self.assertIn("lexical symlink", stderr.getvalue())
             self.assertFalse((nested / "score.json").exists())
 
+    def test_cli_rejects_dot_dot_before_later_lexical_output_symlink_without_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_root = Path(directory).resolve()
+            redirected = temporary_root / "redirected"
+            redirected.mkdir(mode=0o700)
+            nested = redirected / "nested"
+            nested.mkdir(mode=0o700)
+            output_link = temporary_root / "output-link"
+            output_link.symlink_to(redirected, target_is_directory=True)
+            missing = temporary_root / "missing"
+            findings_path = temporary_root / "findings.json"
+            findings_path.write_text("[]", encoding="utf-8")
+            from steward_review_benchmark import main
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit):
+                    main([
+                        "--cases", str(FIXTURE), "--findings", str(findings_path),
+                        "--output", str(missing / ".." / "output-link" / "nested" / "score.json"),
+                    ])
+            self.assertIn("lexical symlink", stderr.getvalue())
+            self.assertFalse(missing.exists())
+            self.assertFalse((nested / "score.json").exists())
+
     def test_cli_rejects_nonprivate_existing_output_directory_without_chmodding(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output_directory = Path(directory).resolve() / "scorecards"

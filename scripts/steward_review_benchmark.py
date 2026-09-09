@@ -214,10 +214,23 @@ def _reject_lexical_symlink_components(path: Path) -> None:
             )
 
 
+def _lexically_normalize_absolute_output_path(path: Path) -> Path:
+    """Normalize dot components without resolving or inspecting the filesystem."""
+    normalized_components: list[str] = []
+    for component in path.parts[1:]:
+        if component == "..":
+            if normalized_components:
+                normalized_components.pop()
+            continue
+        normalized_components.append(component)
+    return Path(path.anchor, *normalized_components)
+
+
 def _private_output_path(value: str) -> Path:
     output = Path(value)
     if not output.is_absolute():
         raise argparse.ArgumentTypeError("output path must be absolute")
+    output = _lexically_normalize_absolute_output_path(output)
     try:
         _reject_lexical_symlink_components(output)
     except ValueError as error:
