@@ -29,8 +29,8 @@
         "model": "claude-opus-4-6"
       },
       "adversarial": {
-        "provider": "anthropic",
-        "model": "claude-sonnet-4-6"
+        "provider": "openai-codex",
+        "model": "gpt-5.6-terra"
       }
     },
     "execute_contributor_code": false,

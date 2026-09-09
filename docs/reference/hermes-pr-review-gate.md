@@ -17,7 +17,7 @@ Keep this repository public-safe. Store live configuration, manifests, reports, 
 3. Optionally copy [`setup/hermes-review-config.example.json`](../../setup/hermes-review-config.example.json) to a private configuration directory when you need custom state roots, lane patterns, or trusted deterministic checks. Do not put secrets, tokens, hostnames, or live local paths in public files.
 4. Load [`skills/hermes-pr-review/SKILL.md`](../../skills/hermes-pr-review/SKILL.md) in Hermes for the review procedure.
 
-Reviewer provider/model identifiers are private operator policy, not credentials: the selected identities are primary `anthropic`/`claude-opus-4-6` and adversarial `anthropic`/`claude-sonnet-4-6`. No credential value belongs in JSON.
+Reviewer provider/model identifiers are private operator policy, not credentials: the selected identities are primary `anthropic`/`claude-opus-4-6` and adversarial `openai-codex`/`gpt-5.6-terra`. No credential value belongs in JSON.
 
 A sanitized configuration has this complete shape:
 
@@ -37,7 +37,7 @@ A sanitized configuration has this complete shape:
     "deep_paths": ["src/**"],
     "reviewers": {
       "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
-      "adversarial": {"provider": "anthropic", "model": "claude-sonnet-4-6"}
+      "adversarial": {"provider": "openai-codex", "model": "gpt-5.6-terra"}
     },
     "execute_contributor_code": false,
     "sandbox_available": false,

@@ -650,7 +650,7 @@ class StewardReviewTests(unittest.TestCase):
         reference_required = [
             "two exact-SHA artifacts",
             "`anthropic`/`claude-opus-4-6`",
-            "`anthropic`/`claude-sonnet-4-6`",
+            "`openai-codex`/`gpt-5.6-terra`",
             "private-only prompt, transcript, and artifact state",
             "no fallback acceptance",
             "no GitHub writes or reviewed-code execution",
@@ -680,7 +680,7 @@ class StewardReviewTests(unittest.TestCase):
             reviewers,
             {
                 "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
-                "adversarial": {"provider": "anthropic", "model": "claude-sonnet-4-6"},
+                "adversarial": {"provider": "openai-codex", "model": "gpt-5.6-terra"},
             },
         )
 
