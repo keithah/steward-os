@@ -4,10 +4,12 @@ import json
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -35,7 +37,10 @@ _ORIGIN_PATTERNS = (
     re.compile(r"ssh://git@github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?"),
 )
 _MAX_PROMPT_DIFF_BYTES = 256 * 1024
+_MAX_REVIEWER_STDOUT_BYTES = 64 * 1024
 _MAX_REVIEWER_STDERR_BYTES = 1024
+_MAX_PROBE_EVIDENCE_BYTES = 8 * 1024
+_MAX_LIMITATION_BYTES = 2 * 1024
 _REVIEWER_TIMEOUT_SECONDS = 300
 _MAX_FINDINGS = 64
 _MAX_LIMITATIONS = 32
@@ -310,7 +315,7 @@ def revalidate_context(context: dict) -> None:
         raise ReviewError(f"git revalidation failed: {message}") from error
 
 
-def _prompt(role: str, context: dict) -> str:
+def _prompt(role: str, reviewer: dict, context: dict) -> str:
     bindings = {
         key: context[key]
         for key in (
@@ -323,6 +328,8 @@ def _prompt(role: str, context: dict) -> str:
         )
     }
     bindings["role"] = role
+    bindings["provider"] = reviewer["provider"]
+    bindings["model"] = reviewer["model"]
     return json.dumps(
         {
             "instructions": (
@@ -332,11 +339,13 @@ def _prompt(role: str, context: dict) -> str:
                 "Emit exactly one JSON object and no markdown or prose. Its exact keys must be: "
                 "repository, head_sha, base_sha, merge_base_sha, config_revision, role, provider, "
                 "model, status, findings, probes, limitations. The provider and model must be the "
-                "requested values. Bind the object to the supplied bindings. Every finding must be "
-                "an object with a nonblank normalized string probe_id. Every probes entry must be "
-                "an object with exactly probe_id, status, and evidence fields, each a nonblank "
-                "normalized string; status must be passed, not-applicable, or finding. If findings "
-                "is empty, probes must record exactly one outcome for every checklist ID. Review "
+                "requested values in the supplied bindings. Bind the object to every supplied "
+                "binding. Status must be exactly complete. Findings must contain exactly the key "
+                "probe_id with a nonblank normalized string value. Every probes entry must be an "
+                "object with exactly probe_id, status, and evidence fields, each a nonblank "
+                "normalized string within their byte bounds; status must be passed, not-applicable, "
+                "or finding. Limitations must be normalized strings within their byte bounds. "
+                "Unconditionally record exactly one outcome for every checklist ID. Review "
                 "every role-specific checklist item, using its stable ID: "
                 + "; ".join(
                     f"{probe_id}: {description}" for probe_id, description in _ROLE_PROBES[role]
@@ -419,6 +428,8 @@ def validate_artifact(artifact: dict, role: str, reviewer: dict, context: dict) 
         raise ReviewError("limitations exceeds limit")
     for limitation in artifact["limitations"]:
         _require_normalized_string(limitation, "limitation")
+        if len(limitation.encode("utf-8")) > _MAX_LIMITATION_BYTES:
+            raise ReviewError("limitation exceeds limit")
     valid_probe_ids = {probe_id for probe_id, _ in _ROLE_PROBES[role]}
     for finding in artifact["findings"]:
         if not isinstance(finding, dict) or set(finding) != {"probe_id"}:
@@ -439,7 +450,9 @@ def validate_artifact(artifact: dict, role: str, reviewer: dict, context: dict) 
         status = _require_normalized_string(probe["status"], "probe status")
         if status not in {"passed", "not-applicable", "finding"}:
             raise ReviewError("probe status invalid")
-        _require_normalized_string(probe["evidence"], "probe evidence")
+        evidence = _require_normalized_string(probe["evidence"], "probe evidence")
+        if len(evidence.encode("utf-8")) > _MAX_PROBE_EVIDENCE_BYTES:
+            raise ReviewError("probe evidence exceeds limit")
     if probe_ids != valid_probe_ids:
         raise ReviewError("complete role probes coverage required")
     finding_probe_ids = {
@@ -462,6 +475,83 @@ def _reviewer_environment() -> dict[str, str]:
     return {name: os.environ[name] for name in allowed if os.environ.get(name)}
 
 
+def _terminate_process_group(process: subprocess.Popen, signal_number: int) -> None:
+    """Signal the isolated reviewer process group if it still exists."""
+    try:
+        os.killpg(process.pid, signal_number)
+    except ProcessLookupError:
+        pass
+
+
+def _drain_reviewer_stream(stream, limit: int, result: dict) -> None:
+    """Drain a reviewer pipe while retaining no more than limit bytes."""
+    captured = bytearray()
+    overflow = False
+    while chunk := stream.read(8_192):
+        remaining = limit - len(captured)
+        if remaining > 0:
+            captured.extend(chunk[:remaining])
+        overflow = overflow or len(chunk) > remaining
+    result["output"] = bytes(captured).decode("utf-8", errors="replace")
+    result["overflow"] = overflow
+
+
+def _run_reviewer_process(command: list[str], prompt_dir: Path, role: str) -> tuple[str, str]:
+    """Run an isolated reviewer with bounded live pipe draining and group cleanup."""
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=prompt_dir,
+            env=_reviewer_environment(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+    except OSError as error:
+        raise ReviewerExecutionError(f"{role} reviewer failed: {error}") from error
+    stdout_result = {}
+    stderr_result = {}
+    stdout_thread = threading.Thread(
+        target=_drain_reviewer_stream,
+        args=(process.stdout, _MAX_REVIEWER_STDOUT_BYTES, stdout_result),
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=_drain_reviewer_stream,
+        args=(process.stderr, _MAX_REVIEWER_STDERR_BYTES, stderr_result),
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+    timed_out = False
+    try:
+        process.wait(timeout=_REVIEWER_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        _terminate_process_group(process, signal.SIGTERM)
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            _terminate_process_group(process, signal.SIGKILL)
+            process.wait()
+    stdout_thread.join()
+    stderr_thread.join()
+    if process.stdout is not None:
+        process.stdout.close()
+    if process.stderr is not None:
+        process.stderr.close()
+    if timed_out:
+        raise ReviewerExecutionError(f"{role} reviewer timed out")
+    if stdout_result["overflow"]:
+        raise ReviewError(f"{role} reviewer stdout exceeds limit")
+    if process.returncode:
+        diagnostic = stderr_result["output"].strip()
+        if diagnostic:
+            raise ReviewerExecutionError(f"{role} reviewer failed: {diagnostic}")
+        raise ReviewerExecutionError(f"{role} reviewer failed")
+    return stdout_result["output"], stderr_result["output"]
+
+
 def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> dict:
     try:
         prompt_dir = Path(tempfile.mkdtemp(prefix="steward-llm-review-"))
@@ -471,7 +561,7 @@ def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> d
     prompt_path = prompt_dir / "review-prompt.json"
     try:
         try:
-            prompt_path.write_text(_prompt(role, context))
+            prompt_path.write_text(_prompt(role, reviewer, context))
             os.chmod(prompt_path, 0o600)
         except OSError as error:
             raise ReviewError(f"{role} reviewer prompt setup failed: {error}") from error
@@ -494,29 +584,8 @@ def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> d
             "--query-file",
             str(prompt_path),
         ]
-        try:
-            completed = subprocess.run(
-                command,
-                cwd=prompt_dir,
-                env=_reviewer_environment(),
-                text=True,
-                capture_output=True,
-                timeout=_REVIEWER_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired as error:
-            raise ReviewerExecutionError(f"{role} reviewer timed out") from error
-        except OSError as error:
-            raise ReviewerExecutionError(f"{role} reviewer failed: {error}") from error
-        if completed.returncode:
-            diagnostic = (
-                completed.stderr.encode("utf-8")[-_MAX_REVIEWER_STDERR_BYTES:]
-                .decode("utf-8", errors="replace")
-                .strip()
-            )
-            if diagnostic:
-                raise ReviewerExecutionError(f"{role} reviewer failed: {diagnostic}")
-            raise ReviewerExecutionError(f"{role} reviewer failed")
-        artifact = parse_only_json(completed.stdout, role)
+        stdout, _stderr = _run_reviewer_process(command, prompt_dir, role)
+        artifact = parse_only_json(stdout, role)
         validate_artifact(artifact, role, reviewer, context)
         return artifact
     finally:
@@ -532,10 +601,12 @@ def run_secondary_reviewer(context: dict, hermes_bin: str) -> dict:
     """Use the first ordered secondary candidate that returns a valid artifact."""
     failures = []
     for candidate in context["reviewers"]["adversarial_candidates"]:
+        revalidate_context(context)
         try:
             return run_reviewer("adversarial", candidate, context, hermes_bin)
         except ReviewerExecutionError as error:
             failures.append(str(error))
+            revalidate_context(context)
     raise ReviewError("all secondary reviewer candidates failed: " + "; ".join(failures))
 
 

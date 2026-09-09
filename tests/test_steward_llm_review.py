@@ -2,11 +2,13 @@ import importlib.util
 import io
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -54,7 +56,9 @@ class StewardLlmReviewTests(unittest.TestCase):
             #!__PYTHON__
             import json
             import os
+            import subprocess
             import sys
+            import time
             from pathlib import Path
 
             args = sys.argv[1:]
@@ -134,6 +138,20 @@ class StewardLlmReviewTests(unittest.TestCase):
             if behavior == "fails-opus" and provider == "anthropic":
                 print("Opus unavailable", file=sys.stderr)
                 raise SystemExit(9)
+            if behavior == "fails-opus-and-advances-head" and provider == "anthropic":
+                repo = hermes_home.parent / "widget"
+                (repo / "post-opus-change.txt").write_text("changed after Opus failure\\n")
+                os.system(f"git -C {repo} add post-opus-change.txt")
+                os.system(f"git -C {repo} commit -m post-opus-change >/dev/null")
+                print("Opus unavailable", file=sys.stderr)
+                raise SystemExit(9)
+            if behavior == "writes-oversized-stdout" and role == "primary":
+                print("x" * (128 * 1024))
+                raise SystemExit(0)
+            if behavior == "forks-child" and role == "primary":
+                child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+                (hermes_home.parent / "reviewer-child.pid").write_text(str(child.pid))
+                time.sleep(30)
             if behavior == "writes-disallowed-candidate" and role == "adversarial":
                 artifact["provider"] = "untrusted"
                 artifact["model"] = "substituted"
@@ -542,6 +560,93 @@ class StewardLlmReviewTests(unittest.TestCase):
         artifact = json.loads(next(self.report_root.rglob("adversarial.json")).read_text())
         self.assertEqual((artifact["provider"], artifact["model"]), ("xai-oauth", "grok-4.6"))
 
+    def test_secondary_state_change_after_opus_execution_failure_blocks_later_candidates(self):
+        result = self.run_orchestrator("fails-opus-and-advances-head")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("HEAD does not match manifest", result.stderr)
+        invocations = [json.loads(line) for line in self.hermes_log.read_text().splitlines()]
+        selected = [entry["args"][entry["args"].index("--provider") + 1] for entry in invocations]
+        self.assertEqual(selected, ["openai-codex", "anthropic"])
+        self.assertFalse(list(self.report_root.rglob("*.json")))
+
+    def test_prompt_binds_selected_reviewer_and_requires_complete_exact_artifact_contract(self):
+        reviewer = self.manifest["required_reviewers"]["adversarial_candidates"][1]
+        context = {
+            "repository": "acme/widget", "branch": "feature/exact-state", "head_sha": self.head_sha,
+            "base_sha": self.base_sha, "merge_base_sha": self.merge_base_sha,
+            "config_revision": self.config_revision, "diff": "committed diff",
+        }
+
+        prompt = json.loads(self.review_module._prompt("adversarial", reviewer, context))
+
+        self.assertEqual(prompt["bindings"]["provider"], "xai-oauth")
+        self.assertEqual(prompt["bindings"]["model"], "grok-4.6")
+        self.assertIn("Status must be exactly complete", prompt["instructions"])
+        self.assertIn("Findings must contain exactly the key probe_id", prompt["instructions"])
+        self.assertIn("Unconditionally record exactly one outcome for every checklist ID", prompt["instructions"])
+        self.assertIn("normalized strings within their byte bounds", prompt["instructions"])
+        self.assertIn("exact keys must be", prompt["instructions"])
+
+    def test_rejects_oversized_reviewer_stdout_before_artifact_parsing_or_persistence(self):
+        result = self.run_orchestrator("writes-oversized-stdout")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("reviewer stdout exceeds limit", result.stderr)
+        self.assertFalse(list(self.report_root.rglob("*.json")))
+
+    def test_rejects_oversized_probe_evidence_and_limitation_strings(self):
+        reviewer = self.manifest["required_reviewers"]["primary"]
+        artifact = {
+            "repository": "acme/widget", "head_sha": self.head_sha, "base_sha": self.base_sha,
+            "merge_base_sha": self.merge_base_sha, "config_revision": self.config_revision,
+            "role": "primary", "provider": reviewer["provider"], "model": reviewer["model"],
+            "status": "complete", "findings": [],
+            "probes": [{"probe_id": probe_id, "status": "passed", "evidence": "checked"}
+                       for probe_id, _ in self.review_module._ROLE_PROBES["primary"]],
+            "limitations": [],
+        }
+        artifact["probes"][0]["evidence"] = "x" * (self.review_module._MAX_PROBE_EVIDENCE_BYTES + 1)
+        with self.assertRaisesRegex(self.review_module.ReviewError, "probe evidence exceeds limit"):
+            self.review_module.validate_artifact(artifact, "primary", reviewer, {
+                key: artifact[key] for key in ("repository", "head_sha", "base_sha", "merge_base_sha", "config_revision")
+            })
+        artifact["probes"][0]["evidence"] = "checked"
+        artifact["limitations"] = ["x" * (self.review_module._MAX_LIMITATION_BYTES + 1)]
+        with self.assertRaisesRegex(self.review_module.ReviewError, "limitation exceeds limit"):
+            self.review_module.validate_artifact(artifact, "primary", reviewer, {
+                key: artifact[key] for key in ("repository", "head_sha", "base_sha", "merge_base_sha", "config_revision")
+            })
+
+    def test_reviewer_timeout_terminates_forked_descendant_process_group(self):
+        context = {
+            "repository": "acme/widget", "branch": "feature/exact-state", "head_sha": self.head_sha,
+            "base_sha": self.base_sha, "merge_base_sha": self.merge_base_sha,
+            "config_revision": self.config_revision, "diff": "",
+        }
+        reviewer = self.manifest["required_reviewers"]["primary"]
+        child_pid_path = self.root / "reviewer-child.pid"
+        try:
+            with (
+                mock.patch.object(self.review_module, "_REVIEWER_TIMEOUT_SECONDS", 1),
+                mock.patch.dict(os.environ, {"HERMES_HOME": str(self.root / "fake-hermes-forks-child")}),
+                self.assertRaisesRegex(self.review_module.ReviewerExecutionError, "reviewer timed out"),
+            ):
+                self.review_module.run_reviewer("primary", reviewer, context, str(self.fake_hermes))
+            deadline = time.monotonic() + 2
+            while not child_pid_path.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(child_pid_path.exists())
+            child_pid = int(child_pid_path.read_text())
+            with self.assertRaises(ProcessLookupError):
+                os.kill(child_pid, 0)
+        finally:
+            if child_pid_path.exists():
+                try:
+                    os.kill(int(child_pid_path.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
     def test_fails_closed_when_opus_prompt_setup_fails_after_primary_succeeds(self):
         original_chmod = self.review_module.os.chmod
         prompt_chmod_calls = 0
@@ -661,8 +766,8 @@ class StewardLlmReviewTests(unittest.TestCase):
         reviewer = self.manifest["required_reviewers"]["adversarial_candidates"][0]
         with (
             mock.patch.object(
-                self.review_module.subprocess, "run",
-                side_effect=subprocess.TimeoutExpired([], 300),
+                self.review_module, "_run_reviewer_process",
+                side_effect=self.review_module.ReviewerExecutionError("adversarial reviewer timed out"),
             ),
             mock.patch.object(self.review_module.shutil, "rmtree", side_effect=OSError("cleanup")),
             self.assertRaisesRegex(self.review_module.ReviewerExecutionError, "reviewer timed out"),
@@ -685,9 +790,10 @@ class StewardLlmReviewTests(unittest.TestCase):
             "probes": [{"probe_id": probe_id, "status": "passed", "evidence": "checked"}
                        for probe_id, _ in self.review_module._ROLE_PROBES["primary"]],
         }
-        completed = subprocess.CompletedProcess([], 0, json.dumps(artifact), "")
         with (
-            mock.patch.object(self.review_module.subprocess, "run", return_value=completed),
+            mock.patch.object(
+                self.review_module, "_run_reviewer_process", return_value=(json.dumps(artifact), ""),
+            ),
             mock.patch.object(self.review_module.shutil, "rmtree", side_effect=OSError("cleanup")),
             self.assertRaisesRegex(self.review_module.ReviewError, "reviewer cleanup failed"),
         ):
