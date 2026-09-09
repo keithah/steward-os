@@ -114,6 +114,8 @@ class StewardLlmReviewTests(unittest.TestCase):
                 raise SystemExit(0)
             if behavior == "writes-tirith-warning":
                 print("  ⚠ tirith security scanner enabled but not available — command scanning will use pattern matching only")
+            if behavior == "writes-tirith-warning-crlf":
+                sys.stdout.write("  ⚠ tirith security scanner enabled but not available — command scanning will use pattern matching only\\r\\n")
             if behavior == "writes-untrusted-prefix" and role == "primary":
                 print("untrusted diagnostic")
             provider = args[args.index("--provider") + 1]
@@ -762,6 +764,15 @@ class StewardLlmReviewTests(unittest.TestCase):
 
     def test_accepts_only_exact_tirith_diagnostic_before_valid_artifacts(self):
         result = self.run_orchestrator("writes-tirith-warning")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            {path.name for path in self.report_root.rglob("*.json")},
+            {"primary.json", "adversarial.json"},
+        )
+
+    def test_accepts_exact_tirith_diagnostic_with_crlf_before_valid_artifacts(self):
+        result = self.run_orchestrator("writes-tirith-warning-crlf")
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(

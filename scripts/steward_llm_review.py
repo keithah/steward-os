@@ -395,6 +395,8 @@ def ensure_private_report_root(report_root: Path) -> None:
 def parse_only_json(output: str, role: str) -> dict:
     if output.startswith(_TIRITH_UNAVAILABLE_DIAGNOSTIC):
         output = output.removeprefix(_TIRITH_UNAVAILABLE_DIAGNOSTIC)
+    elif output.startswith(_TIRITH_UNAVAILABLE_DIAGNOSTIC.replace("\n", "\r\n")):
+        output = output.removeprefix(_TIRITH_UNAVAILABLE_DIAGNOSTIC.replace("\n", "\r\n"))
     if not output.strip():
         raise ReviewError(f"{role} artifact missing")
     try:
