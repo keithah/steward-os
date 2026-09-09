@@ -350,6 +350,11 @@ class StewardReviewTests(unittest.TestCase):
 
     def test_blocks_skipped_project_quality_checks(self):
         """Configured but unexecuted checks leave the gate incomplete."""
+        self.config["review"]["reviewers"] = {
+            "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
+            "adversarial": {"provider": "openai-codex", "model": "gpt-5.6-terra"},
+        }
+        self.write_config()
         result = self.run_runner()
         self.assertEqual(result.returncode, 1, result.stderr)
         manifest = self.read_manifest()
@@ -519,6 +524,10 @@ class StewardReviewTests(unittest.TestCase):
 
     def test_caps_command_output_in_evidence(self):
         """Exercise the Steward review gate behavior."""
+        self.config["review"]["reviewers"] = {
+            "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
+            "adversarial": {"provider": "openai-codex", "model": "gpt-5.6-terra"},
+        }
         self.config["review"]["commands"] = [
             {
                 "id": "large-output",
@@ -718,6 +727,37 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(manifest["lane"], "deep")
         self.assertEqual(manifest["required_reviewers"], reviewers)
         self.assertEqual(manifest["reviewer_contract_version"], "1")
+
+    def test_requires_only_primary_reviewer_for_fast_lane(self):
+        """Fast review emits the primary contract from dual-reviewer policy."""
+        reviewers = {
+            "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
+            "adversarial": {"provider": "openai-codex", "model": "gpt-5.6-terra"},
+        }
+        self.config["review"].update(reviewers=reviewers, commands=[])
+        self.write_config()
+
+        result = self.run_runner()
+        manifest = self.read_manifest()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(manifest["lane"], "fast")
+        self.assertEqual(manifest["required_reviewers"], {"primary": reviewers["primary"]})
+        self.assertEqual(manifest["reviewer_contract_version"], "1")
+
+    def test_blocks_fast_lane_without_required_primary_reviewer(self):
+        """Fast review cannot emit a ready manifest without its primary contract."""
+        self.config["review"].update(commands=[])
+        self.write_config()
+
+        result = self.run_runner()
+        manifest = self.read_manifest()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(manifest["lane"], "fast")
+        self.assertEqual(manifest["status"], "blocked")
+        self.assertIn("missing required reviewer configuration", manifest["evidence_gaps"])
+        self.assertIsNone(manifest["required_reviewers"])
 
     def test_records_private_report_root_in_ready_manifest(self):
         """Ready manifests bind the resolved private artifact root."""

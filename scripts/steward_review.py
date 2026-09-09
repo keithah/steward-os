@@ -26,6 +26,11 @@ _ORIGIN_PATTERNS = (
 )
 _CAPTURE_LIMIT = 16_384
 REVIEWER_ROLES = ("primary", "adversarial")
+LANE_REVIEWER_ROLES = {
+    "fast": ("primary",),
+    "deep": REVIEWER_ROLES,
+    "visual": REVIEWER_ROLES,
+}
 REVIEWER_CONTRACT_VERSION = "1"
 
 
@@ -376,6 +381,14 @@ def select_lane(changed_paths: list[str], review: dict) -> str:
     return "fast"
 
 
+def required_reviewer_contracts(lane: str, review: dict) -> Optional[dict]:
+    """Select the configured contracts required by the selected review lane."""
+    reviewers = review.get("reviewers")
+    if reviewers is None:
+        return None
+    return {role: reviewers[role] for role in LANE_REVIEWER_ROLES[lane]}
+
+
 def _bounded_text(value: str) -> tuple[str, bool]:
     """Return a UTF-8 byte-bounded string and whether it was truncated."""
     encoded = value.encode("utf-8")
@@ -570,13 +583,13 @@ def main() -> int:
         for name in ("report_root", "manifest_root"):
             prepare_private_state_root(Path(config["paths"][name]), name)
         lane = select_lane(manifest["changed_paths"], config["review"])
-        required_reviewers = config["review"].get("reviewers")
+        required_reviewers = required_reviewer_contracts(lane, config["review"])
         evidence_gaps = (
             ["no repository-specific review configuration"]
             if config_source == "builtin-default"
             else []
         )
-        if lane in {"deep", "visual"} and required_reviewers is None:
+        if required_reviewers is None:
             evidence_gaps.append("missing required reviewer configuration")
         manifest.update(
             {

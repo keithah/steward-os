@@ -195,7 +195,7 @@ class StewardLlmReviewTests(unittest.TestCase):
             },
         )
 
-    def write_ready_runner_manifest(self):
+    def write_ready_runner_manifest(self, lane="deep", initialize=True):
         """Produce a ready manifest through the real local review runner."""
         def run_git(*args):
             subprocess.run(
@@ -206,18 +206,19 @@ class StewardLlmReviewTests(unittest.TestCase):
                 capture_output=True,
             )
 
-        run_git("init")
-        run_git("checkout", "-b", "main")
-        run_git("config", "user.email", "tests@example.invalid")
-        run_git("config", "user.name", "Steward Tests")
-        run_git("remote", "add", "origin", "https://github.com/acme/widget.git")
-        (self.repo / "README.md").write_text("base\n")
-        run_git("add", "README.md")
-        run_git("commit", "-m", "base")
-        run_git("checkout", "-b", "feature/exact-state")
-        (self.repo / "feature.txt").write_text("feature\n")
-        run_git("add", "feature.txt")
-        run_git("commit", "-m", "feature")
+        if initialize:
+            run_git("init")
+            run_git("checkout", "-b", "main")
+            run_git("config", "user.email", "tests@example.invalid")
+            run_git("config", "user.name", "Steward Tests")
+            run_git("remote", "add", "origin", "https://github.com/acme/widget.git")
+            (self.repo / "README.md").write_text("base\n")
+            run_git("add", "README.md")
+            run_git("commit", "-m", "base")
+            run_git("checkout", "-b", "feature/exact-state")
+            (self.repo / "feature.txt").write_text("feature\n")
+            run_git("add", "feature.txt")
+            run_git("commit", "-m", "feature")
 
         manifest_root = self.root / "manifests"
         config_path = self.root / "config.json"
@@ -230,7 +231,7 @@ class StewardLlmReviewTests(unittest.TestCase):
             "review": {
                 "sensitive_paths": ["auth/**"],
                 "visual_paths": ["web/**"],
-                "deep_paths": ["feature.txt"],
+                "deep_paths": ["feature.txt"] if lane == "deep" else [],
                 "reviewers": self.manifest["required_reviewers"],
                 "execute_contributor_code": False,
                 "sandbox_available": False,
@@ -383,6 +384,26 @@ class StewardLlmReviewTests(unittest.TestCase):
         result = self.run_orchestrator()
 
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            {path.name for path in self.report_root.rglob("*.json")},
+            {"primary.json"},
+        )
+        invocations = [json.loads(line) for line in self.hermes_log.read_text().splitlines()]
+        self.assertEqual(len(invocations), 1)
+        self.assertEqual(
+            invocations[0]["args"][invocations[0]["args"].index("--provider") + 1],
+            "primary-provider",
+        )
+
+    def test_accepts_fast_manifest_generated_by_the_review_runner(self):
+        """A configured fast lane launches only its generated primary contract."""
+        self.write_ready_runner_manifest(lane="fast", initialize=False)
+
+        result = self.run_orchestrator()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.manifest["lane"], "fast")
+        self.assertEqual(set(self.manifest["required_reviewers"]), {"primary"})
         self.assertEqual(
             {path.name for path in self.report_root.rglob("*.json")},
             {"primary.json"},
