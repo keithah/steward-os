@@ -14,7 +14,7 @@ from pathlib import Path
 class StewardLlmReviewTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp_dir.name)
+        self.root = Path(self.temp_dir.name).resolve()
         self.repo = self.root / "widget"
         self.repo.mkdir()
         self.report_root = self.root / "private-state" / "reports"

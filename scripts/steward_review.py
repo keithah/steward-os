@@ -183,28 +183,29 @@ def _require_private_directory(path: Path, label: str) -> None:
 
 def validate_lexical_path(path: Path, label: str) -> None:
     """Reject symlinks in every existing lexical component before resolution."""
-    current = path
-    while True:
+    for current in _lexical_path_components(path):
         try:
             current_stat = current.lstat()
         except FileNotFoundError:
-            pass
+            continue
         except OSError as error:
             raise ReviewError(f"cannot inspect {label}: {error}") from error
-        else:
-            if stat.S_ISLNK(current_stat.st_mode):
-                raise ReviewError(f"{label} must not traverse a symlink")
-            if (
-                stat.S_ISDIR(current_stat.st_mode)
-                and (
-                    current_stat.st_uid != os.getuid()
-                    or stat.S_IMODE(current_stat.st_mode) & 0o077
-                )
-            ):
-                return
-        if current.parent == current:
-            return
-        current = current.parent
+        if stat.S_ISLNK(current_stat.st_mode):
+            raise ReviewError(f"{label} must not traverse a symlink")
+
+
+def _lexical_path_components(path: Path):
+    """Yield lexical path prefixes from root through leaf without resolving them."""
+    if path.is_absolute():
+        current = Path(path.anchor)
+        parts = path.parts[1:]
+    else:
+        current = Path(".")
+        parts = path.parts
+    yield current
+    for part in parts:
+        current /= part
+        yield current
 
 
 def secure_directory_chain(root: Path, label: str) -> None:

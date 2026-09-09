@@ -11,7 +11,7 @@ from pathlib import Path
 class StewardReviewTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp_dir.name)
+        self.root = Path(self.temp_dir.name).resolve()
         self.repo = self.root / "widget"
         self.repo.mkdir()
         self.run_git("init")
@@ -156,6 +156,29 @@ class StewardReviewTests(unittest.TestCase):
                 self.assertFalse((redirected_state / "reports").exists())
                 self.assertFalse((redirected_state / "manifests").exists())
 
+    def test_default_state_root_rejects_parent_symlink_when_target_contains_runtime(self):
+        home = self.root / "home-existing-runtime"
+        state_parent = home / ".config"
+        state_parent.mkdir(mode=0o700, parents=True)
+        state_parent.chmod(0o700)
+        redirected_state = self.root / "redirected-default-existing-runtime"
+        redirected_state.mkdir(mode=0o700)
+        redirected_state.chmod(0o700)
+        runtime = redirected_state / "runtime"
+        runtime.mkdir(mode=0o755)
+        runtime.chmod(0o755)
+        (state_parent / "steward-os").symlink_to(redirected_state, target_is_directory=True)
+
+        env = {**os.environ, "HOME": str(home)}
+        env.pop("STEWARD_STATE_ROOT", None)
+        result = self.run_runner(env=env)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("built-in state root must not traverse a symlink", result.stderr)
+        self.assertFalse((runtime / "reports").exists())
+        self.assertFalse((runtime / "manifests").exists())
+
     def test_builtin_state_root_rejects_lexical_symlinks_before_manifest_write(self):
         redirected_state = self.root / "redirected-state"
         redirected_state.mkdir(mode=0o700)
@@ -289,6 +312,27 @@ class StewardReviewTests(unittest.TestCase):
                 self.assertFalse((redirected_state / name).exists())
                 self.assertFalse((self.root / "global-manifests").exists())
                 policy["paths"][name] = str(self.root / f"global-{name}s")
+
+    def test_rejects_custom_state_parent_symlink_when_target_contains_remaining_path(self):
+        policy_root = self.policy_root()
+        policy = self.write_policy(policy_root)
+        redirected_state = self.root / "redirected-existing-custom-state"
+        redirected_state.mkdir(mode=0o700)
+        redirected_state.chmod(0o700)
+        existing_root = redirected_state / "reports" / "nested"
+        existing_root.mkdir(mode=0o755, parents=True)
+        existing_root.chmod(0o755)
+        state_link = self.root / "state-link-existing-path"
+        state_link.symlink_to(redirected_state, target_is_directory=True)
+        policy["paths"]["report_root"] = str(state_link / "reports" / "nested")
+        (policy_root / "policy.json").write_text(json.dumps(policy))
+
+        result = self.run_runner(env=self.ready_env(policy_root))
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("paths.report_root must not traverse a symlink", result.stderr)
+        self.assertFalse((existing_root / "acme__widget").exists())
+        self.assertFalse((self.root / "global-manifests").exists())
 
     def test_rejects_policy_root_or_policy_json_symlink_before_manifest_write(self):
         private_policy = self.policy_root()
