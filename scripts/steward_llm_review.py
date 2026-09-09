@@ -173,17 +173,21 @@ def _policy_context(repo_dir: Path) -> dict:
         message = error.stderr.strip() or error.stdout.strip() or str(error)
         raise ReviewError(f"cannot derive policy review state: {message}") from error
     lane = steward_review.select_lane(changed_paths, config["review"])
+    report_root = Path(config["paths"]["report_root"])
+    manifest_root = Path(config["paths"]["manifest_root"])
+    steward_review.validate_lexical_path(report_root, "report_root")
+    steward_review.validate_lexical_path(manifest_root, "manifest_root")
     return {
         "repository": repository,
         "head_sha": head_sha,
         "branch": branch,
         "base_ref": base_ref,
         "config_revision": steward_review._config_revision(config),
-        "report_root": Path(config["paths"]["report_root"]).resolve(),
+        "report_root": report_root.resolve(),
         "lane": lane,
         "reviewers": steward_review.required_reviewer_contracts(lane, config["review"]),
         "manifest_path": steward_review.manifest_path(
-            Path(config["paths"]["manifest_root"]).resolve(), repository, branch, head_sha
+            manifest_root.resolve(), repository, branch, head_sha
         ).resolve(),
     }
 
@@ -213,6 +217,7 @@ def load_context(repo_dir: Path, manifest_path: Path, policy: dict) -> dict:
     report_root = Path(_require_string(report_root_value, "report_root"))
     if not report_root.is_absolute():
         raise ReviewError("report_root must be absolute")
+    steward_review.validate_lexical_path(report_root, "report_root")
     report_root = report_root.resolve()
     if _inside(report_root, repo_dir):
         raise ReviewError("report_root must be outside reviewed checkout")
@@ -540,8 +545,10 @@ def main() -> int:
         repo_dir = args.repo_dir.resolve()
         if not repo_dir.is_dir():
             raise ReviewError("repo-dir must be a directory")
-        manifest_path = args.manifest.resolve()
+        manifest_path = args.manifest
         policy = _policy_context(repo_dir)
+        steward_review.validate_lexical_path(manifest_path, "manifest path")
+        manifest_path = manifest_path.resolve()
         context = load_context(repo_dir, manifest_path, policy)
         revalidate_context(context)
         ensure_private_report_root(context["report_root"])

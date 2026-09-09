@@ -282,6 +282,65 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertFalse(self.hermes_log.exists())
         self.assertFalse(list(self.report_root.rglob("*.json")))
 
+    def test_rejects_policy_state_symlink_before_reviewer_or_artifacts(self):
+        policy = json.loads((self.policy_root / "policy.json").read_text())
+        state_link = self.root / "state-link"
+        state_link.symlink_to(self.root / "private-state", target_is_directory=True)
+
+        for name in ("report_root", "manifest_root"):
+            with self.subTest(name=name):
+                policy["paths"][name] = str(state_link / name.removesuffix("_root"))
+                (self.policy_root / "policy.json").write_text(json.dumps(policy))
+
+                result = self.run_orchestrator()
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("must not traverse a symlink", result.stderr)
+                self.assertFalse(self.hermes_log.exists())
+                self.assertFalse(list(self.report_root.rglob("*.json")))
+                policy["paths"][name] = str(self.root / "private-state" / name.removesuffix("_root"))
+
+    def test_rejects_deterministic_manifest_policy_contract_substitutions_before_reviewer_or_artifacts(self):
+        mutations = (
+            (
+                "reviewer",
+                lambda manifest: manifest["required_reviewers"]["primary"].update(model="substituted"),
+                "reviewer contracts do not match active global policy",
+            ),
+            (
+                "lane-and-roles",
+                lambda manifest: manifest.update(
+                    lane="fast",
+                    required_reviewers={"primary": manifest["required_reviewers"]["primary"]},
+                ),
+                "lane does not match active global policy",
+            ),
+            (
+                "config-revision",
+                lambda manifest: manifest.update(config_revision="e" * 64),
+                "config_revision does not match active global policy",
+            ),
+            (
+                "report-root",
+                lambda manifest: manifest.update(report_root=str(self.root / "substituted-reports")),
+                "report_root does not match active global policy",
+            ),
+        )
+        deterministic_manifest_path = self.manifest_path
+        for name, mutate, diagnostic in mutations:
+            with self.subTest(name=name):
+                manifest = json.loads(deterministic_manifest_path.read_text())
+                mutate(manifest)
+                deterministic_manifest_path.write_text(json.dumps(manifest))
+
+                result = self.run_orchestrator(manifest_path=deterministic_manifest_path)
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(diagnostic, result.stderr)
+                self.assertFalse(self.hermes_log.exists())
+                self.assertFalse(list(self.report_root.rglob("*.json")))
+                self.write_ready_runner_manifest(initialize=False)
+
     def test_accepts_ready_runner_manifest_contract(self):
         """A real ready manifest drives both fake reviewer artifact writes."""
         result = self.run_orchestrator()

@@ -54,6 +54,19 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
         }
         self.assertEqual(validate_cases([case]), [case])
 
+        valid_url_cases = []
+        for url in (
+            "https://example.test/path?next=/login",
+            "https://example.test/?redirect=/private/area",
+            "//cdn.example.test/app",
+        ):
+            url_case = copy.deepcopy(case)
+            url_case["hypothesis"] = f"A valid URL: {url}"
+            valid_url_cases.append(url_case)
+        for url_case in valid_url_cases:
+            with self.subTest(url_case=url_case):
+                self.assertEqual(validate_cases([url_case]), [url_case])
+
         invalid_cases = []
         duplicate = [case, copy.deepcopy(case)]
         invalid_cases.append(duplicate)

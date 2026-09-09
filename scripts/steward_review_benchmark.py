@@ -42,6 +42,10 @@ _TOKEN_PATTERN = re.compile(
 _ABSOLUTE_PATH_PATTERN = re.compile(
     r"(?<![A-Za-z0-9+.-])/(?!/)|(?<![A-Za-z0-9])[A-Za-z]:[\\/]|(?<!\\)\\\\[^\\/]+[\\/]"
 )
+_URL_SPAN_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9+.-])(?:https://|//)"
+    r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]+)?(?:/[^\s]*)?"
+)
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _PROBE_SEPARATORS = re.compile(r"[_\s]+")
 _ROLE_PROBE_TO_CORPUS_PROBES = {
@@ -100,7 +104,8 @@ def _validate_redaction(value: Any, path: tuple[str, ...] = ()) -> None:
     elif isinstance(value, str):
         if _TOKEN_PATTERN.search(value):
             raise ValueError(f"token-like string is not permitted at {location}")
-        if _ABSOLUTE_PATH_PATTERN.search(value):
+        non_url_text = _URL_SPAN_PATTERN.sub("", value)
+        if _ABSOLUTE_PATH_PATTERN.search(non_url_text):
             raise ValueError(f"absolute path is not permitted at {location}")
 
 

@@ -203,6 +203,52 @@ class StewardReviewTests(unittest.TestCase):
         self.assertIn("owner-private", result.stderr)
         self.assertEqual(stat.S_IMODE(nonprivate.stat().st_mode), 0o755)
 
+    def test_rejects_intermediate_symlink_in_policy_state_paths_before_manifest_write(self):
+        policy_root = self.policy_root()
+        policy = self.write_policy(policy_root)
+        redirected_state = self.root / "redirected-state"
+        redirected_state.mkdir(mode=0o700)
+        redirected_state.chmod(0o700)
+        state_link = self.root / "state-link"
+        state_link.symlink_to(redirected_state, target_is_directory=True)
+
+        for name in ("report_root", "manifest_root"):
+            with self.subTest(name=name):
+                policy["paths"][name] = str(state_link / name / "nested")
+                (policy_root / "policy.json").write_text(json.dumps(policy))
+
+                result = self.run_runner(env=self.ready_env(policy_root))
+
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("must not traverse a symlink", result.stderr)
+                self.assertFalse((redirected_state / name).exists())
+                self.assertFalse((self.root / "global-manifests").exists())
+                policy["paths"][name] = str(self.root / f"global-{name}s")
+
+    def test_rejects_policy_root_or_policy_json_symlink_before_manifest_write(self):
+        private_policy = self.policy_root()
+        self.write_policy(private_policy)
+        linked_policy_root = self.root / "linked-policy"
+        linked_policy_root.symlink_to(private_policy, target_is_directory=True)
+
+        result = self.run_runner(env=self.ready_env(linked_policy_root))
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("must not traverse a symlink", result.stderr)
+        self.assertFalse((self.root / "global-manifests").exists())
+
+        policy_root = private_policy
+        policy_target = self.root / "policy-target.json"
+        policy_target.write_text((policy_root / "policy.json").read_text())
+        (policy_root / "policy.json").unlink()
+        (policy_root / "policy.json").symlink_to(policy_target)
+
+        result = self.run_runner(env=self.ready_env(policy_root))
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("must not traverse a symlink", result.stderr)
+        self.assertFalse((self.root / "global-manifests").exists())
+
     def test_rejects_executable_global_policy(self):
         policy_root = self.policy_root()
         self.write_policy(policy_root, mutate=lambda policy: policy["review"].update(commands=[{"id": "test", "command": "true", "execution": "safe"}]))

@@ -169,12 +169,40 @@ def _require_private_directory(path: Path, label: str) -> None:
         root_stat = path.lstat()
     except OSError as error:
         raise ReviewError(f"cannot inspect {label}: {error}") from error
+    if stat.S_ISLNK(root_stat.st_mode):
+        raise ReviewError(f"{label} must not traverse a symlink")
     if (
         not stat.S_ISDIR(root_stat.st_mode)
         or root_stat.st_uid != os.getuid()
         or stat.S_IMODE(root_stat.st_mode) & 0o077
     ):
         raise ReviewError(f"{label} must be owner-private")
+
+
+def validate_lexical_path(path: Path, label: str) -> None:
+    """Reject symlinks in every existing lexical component before resolution."""
+    current = path
+    while True:
+        try:
+            current_stat = current.lstat()
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            raise ReviewError(f"cannot inspect {label}: {error}") from error
+        else:
+            if stat.S_ISLNK(current_stat.st_mode):
+                raise ReviewError(f"{label} must not traverse a symlink")
+            if (
+                stat.S_ISDIR(current_stat.st_mode)
+                and (
+                    current_stat.st_uid != os.getuid()
+                    or stat.S_IMODE(current_stat.st_mode) & 0o077
+                )
+            ):
+                return
+        if current.parent == current:
+            return
+        current = current.parent
 
 
 def secure_directory_chain(root: Path, label: str) -> None:
@@ -284,6 +312,7 @@ def load_config(path: Path, repo_dir: Path, config: Optional[dict] = None) -> di
         root = Path(paths[name])
         if not root.is_absolute():
             raise ReviewError(f"paths.{name} must be absolute")
+        validate_lexical_path(root, f"paths.{name}")
         resolved_root = root.resolve()
         if _is_inside(resolved_root, reviewed_checkout):
             raise ReviewError(f"paths.{name} must be outside reviewed checkout")
@@ -352,6 +381,7 @@ def _private_policy_root(repo_dir: Path) -> Optional[Path]:
     root = Path(configured)
     if not root.is_absolute():
         raise ReviewError("STEWARD_POLICY_ROOT must be absolute")
+    validate_lexical_path(root, "STEWARD_POLICY_ROOT")
     root = root.resolve()
     if _is_inside(root, repo_dir.resolve()):
         raise ReviewError("STEWARD_POLICY_ROOT must be outside reviewed checkout")
@@ -381,7 +411,9 @@ def _read_policy_json(path: Path, label: str) -> dict:
 
 def _global_policy_config(policy_root: Path, repo_dir: Path) -> dict:
     """Build validated configuration from origin-derived identity and owner policy."""
-    policy_path = (policy_root / "policy.json").resolve()
+    policy_path = policy_root / "policy.json"
+    validate_lexical_path(policy_path, "global policy")
+    policy_path = policy_path.resolve()
     if not _is_inside(policy_path, policy_root) or not policy_path.is_file():
         raise ReviewError("STEWARD_POLICY_ROOT must contain policy.json")
     policy = _read_policy_json(policy_path, "global policy")
