@@ -98,6 +98,26 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate_cases(cases)
 
+    def test_scorer_translates_bounded_role_probe_to_canonical_corpus_probes(self) -> None:
+        cases = [{
+            "id": "credential-output-redirect",
+            "source": {"repository": "keithah/example", "pr": 12},
+            "revision": "0123456789abcdef0123456789abcdef01234567",
+            "language": "python",
+            "defect_class": "credential-egress",
+            "hypothesis": "Outputs and redirects must not leak credentials.",
+            "expected_probes": ["credential.output-boundary", "credential.redirect-boundary"],
+            "severity": "high",
+            "disposition": "remediated",
+        }]
+
+        score = score_cases(cases, [
+            {"probe_id": "adversarial.token-output-redirect-boundaries"},
+        ])
+
+        self.assertEqual(score["matched_case_ids"], ["credential-output-redirect"])
+        self.assertEqual(score["unexpected_findings"], [])
+
     def test_scorer_matches_normalized_probe_ids_and_reports_unexpected(self) -> None:
         cases = [
             {

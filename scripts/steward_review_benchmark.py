@@ -39,6 +39,41 @@ _TOKEN_PATTERN = re.compile(
 _ABSOLUTE_PATH_PATTERN = re.compile(r"(?:^/|^[A-Za-z]:[\\/]|^\\\\)")
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _PROBE_SEPARATORS = re.compile(r"[_\s]+")
+_ROLE_PROBE_TO_CORPUS_PROBES = {
+    "primary.public-contract-compatibility": (
+        "authorization.compatibility-path", "input.public-contract",
+    ),
+    "primary.malformed-omitted-negative-timezone-inputs": (
+        "input.shape", "input.omitted", "input.negative", "input.timezone", "input.type",
+    ),
+    "primary.error-propagation": (
+        "error.caller-propagation", "error.status-propagation",
+    ),
+    "adversarial.policy-effectful-sinks": (
+        "capability.effectful-sink", "authorization.effectful-sink",
+    ),
+    "adversarial.token-output-redirect-boundaries": (
+        "credential.output-boundary", "credential.redirect-boundary",
+    ),
+    "adversarial.cancellation-partial-success-compensation": (
+        "cancellation.compensation", "cancellation.partial-success",
+    ),
+    "adversarial.writers-shared-locks": (
+        "state.all-writers", "lock.error-recovery",
+    ),
+    "adversarial.pagination-snapshots-changed-totals": (
+        "pagination.snapshot", "pagination.changed-total",
+    ),
+    "adversarial.ordering-deduplication": (
+        "pagination.ordering", "pagination.deduplication",
+    ),
+    "adversarial.ambient-credentials-caller-authorization": (
+        "credential.ambient-source", "authorization.caller-widening",
+    ),
+    "adversarial.process-cleanup-status-propagation": (
+        "process.cleanup", "process.status-propagation",
+    ),
+}
 
 
 def normalize_probe_id(value: str) -> str:
@@ -109,8 +144,9 @@ def score_cases(cases: list[dict[str, Any]], reviewer_findings: list[dict[str, A
         probe_id = normalize_probe_id(finding["probe_id"])
         if not probe_id:
             raise ValueError("probe_id cannot be empty")
-        if probe_id not in finding_ids:
-            finding_ids.append(probe_id)
+        for scorer_probe_id in _ROLE_PROBE_TO_CORPUS_PROBES.get(probe_id, (probe_id,)):
+            if scorer_probe_id not in finding_ids:
+                finding_ids.append(scorer_probe_id)
 
     expected_by_case = [
         {normalize_probe_id(probe) for probe in case["expected_probes"]}

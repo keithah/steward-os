@@ -15,7 +15,11 @@ class ReviewError(Exception):
     pass
 
 
-_ROLES = ("primary", "adversarial")
+_LANE_ROLES = {
+    "fast": ("primary",),
+    "deep": ("primary", "adversarial"),
+    "visual": ("primary", "adversarial"),
+}
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _ORIGIN_PATTERNS = (
@@ -175,10 +179,14 @@ def load_context(repo_dir: Path, manifest_path: Path) -> dict:
     if _inside(report_root, repo_dir):
         raise ReviewError("report_root must be outside reviewed checkout")
 
+    lane = manifest.get("lane")
+    if not isinstance(lane, str) or lane not in _LANE_ROLES:
+        raise ReviewError("lane invalid")
+    roles = _LANE_ROLES[lane]
     reviewers = manifest.get("required_reviewers")
-    if not isinstance(reviewers, dict) or set(reviewers) != set(_ROLES):
+    if not isinstance(reviewers, dict) or set(reviewers) != set(roles):
         raise ReviewError("required_reviewers invalid")
-    for role in _ROLES:
+    for role in roles:
         reviewer = reviewers[role]
         if not isinstance(reviewer, dict) or set(reviewer) != {"provider", "model"}:
             raise ReviewError(f"{role} reviewer contract invalid")
@@ -200,6 +208,8 @@ def load_context(repo_dir: Path, manifest_path: Path) -> dict:
             manifest.get("config_revision"), "config_revision", _REVISION_PATTERN
         ),
         "report_root": report_root,
+        "lane": lane,
+        "roles": roles,
         "reviewers": reviewers,
     }
 
@@ -452,7 +462,8 @@ def _artifact_path(context: dict, role: str) -> Path:
 
 
 def persist_artifacts(context: dict, artifacts: dict) -> list[Path]:
-    destination_directory = _artifact_path(context, _ROLES[0]).parent
+    roles = context.get("roles", tuple(artifacts))
+    destination_directory = _artifact_path(context, roles[0]).parent
     destination_parent = destination_directory.parent
     staging_directory = None
     try:
@@ -464,7 +475,7 @@ def persist_artifacts(context: dict, artifacts: dict) -> list[Path]:
             tempfile.mkdtemp(prefix=f".{context['head_sha']}.", dir=destination_parent)
         )
         os.chmod(staging_directory, 0o700)
-        for role in _ROLES:
+        for role in roles:
             artifact_path = staging_directory / f"{role}.json"
             descriptor = os.open(artifact_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(descriptor, "w") as temporary_file:
@@ -474,7 +485,7 @@ def persist_artifacts(context: dict, artifacts: dict) -> list[Path]:
             raise ReviewError("exact-SHA artifact directory already exists")
         staging_directory.replace(destination_directory)
         staging_directory = None
-        return [_artifact_path(context, role) for role in _ROLES]
+        return [_artifact_path(context, role) for role in roles]
     except OSError as error:
         raise ReviewError(f"cannot persist artifacts: {error}") from error
     finally:
@@ -498,10 +509,10 @@ def main() -> int:
         context["diff"] = committed_diff(context)
         revalidate_context(context)
         artifacts = {}
-        for role in _ROLES:
+        for role in context["roles"]:
             artifacts[role] = run_reviewer(role, context["reviewers"][role], context, args.hermes_bin)
             revalidate_context(context)
-        for role in _ROLES:
+        for role in context["roles"]:
             if role not in artifacts:
                 raise ReviewError(f"{role} artifact missing")
         revalidate_context(context)

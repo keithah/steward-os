@@ -373,6 +373,27 @@ class StewardLlmReviewTests(unittest.TestCase):
         for invocation in invocations:
             self.assertIn(f'"branch": "{self.head_sha}"', invocation["prompt"])
 
+    def test_accepts_fast_manifest_with_exactly_one_primary_artifact(self):
+        self.manifest["lane"] = "fast"
+        self.manifest["required_reviewers"] = {
+            "primary": {"provider": "primary-provider", "model": "primary-model"},
+        }
+        self.write_manifest()
+
+        result = self.run_orchestrator()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            {path.name for path in self.report_root.rglob("*.json")},
+            {"primary.json"},
+        )
+        invocations = [json.loads(line) for line in self.hermes_log.read_text().splitlines()]
+        self.assertEqual(len(invocations), 1)
+        self.assertEqual(
+            invocations[0]["args"][invocations[0]["args"].index("--provider") + 1],
+            "primary-provider",
+        )
+
     def test_requires_both_primary_and_adversarial_artifacts(self):
         result = self.run_orchestrator("writes-valid-primary-only")
 
