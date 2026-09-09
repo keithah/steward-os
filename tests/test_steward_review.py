@@ -378,6 +378,37 @@ class StewardReviewTests(unittest.TestCase):
         self.assertIn("must not traverse a symlink", result.stderr)
         self.assertFalse((self.root / "global-manifests").exists())
 
+    def test_rejects_symlinked_policy_overrides_parent_before_manifest_write(self):
+        policy_root = self.policy_root()
+        self.write_policy(policy_root)
+        external_overrides = self.root / "external-overrides"
+        external_overrides.mkdir(mode=0o700)
+        external_overrides.chmod(0o700)
+        (external_overrides / "acme__widget.json").write_text(json.dumps({"base_ref": "main"}))
+        (policy_root / "overrides").symlink_to(external_overrides, target_is_directory=True)
+
+        result = self.run_runner(env=self.ready_env(policy_root))
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("policy override must not traverse a symlink", result.stderr)
+        self.assertFalse((self.root / "global-manifests").exists())
+
+    def test_rejects_symlinked_policy_repository_override_before_manifest_write(self):
+        policy_root = self.policy_root()
+        self.write_policy(policy_root)
+        overrides = policy_root / "overrides"
+        overrides.mkdir(mode=0o700)
+        overrides.chmod(0o700)
+        external_override = self.root / "external-override.json"
+        external_override.write_text(json.dumps({"base_ref": "main"}))
+        (overrides / "acme__widget.json").symlink_to(external_override)
+
+        result = self.run_runner(env=self.ready_env(policy_root))
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("policy override must not traverse a symlink", result.stderr)
+        self.assertFalse((self.root / "global-manifests").exists())
+
     def test_rejects_executable_global_policy(self):
         policy_root = self.policy_root()
         self.write_policy(policy_root, mutate=lambda policy: policy["review"].update(commands=[{"id": "test", "command": "true", "execution": "safe"}]))

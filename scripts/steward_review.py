@@ -430,6 +430,7 @@ def _global_policy_config(policy_root: Path, repo_dir: Path) -> dict:
         "review": policy["review"],
     }
     override_path = policy_root / "overrides" / f"{config['repository']['id'].replace('/', '__')}.json"
+    validate_lexical_path(override_path, "policy override")
     if override_path.is_file():
         override = _read_policy_json(override_path, "policy override")
         _require_keys(override, {"base_ref", "review"}, set(override), "policy override")
