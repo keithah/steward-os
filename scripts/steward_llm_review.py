@@ -18,6 +18,11 @@ class ReviewError(Exception):
 _ROLES = ("primary", "adversarial")
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_ORIGIN_PATTERNS = (
+    re.compile(r"https://github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?"),
+    re.compile(r"git@github\.com:([^/\s]+)/([^/\s]+?)(?:\.git)?"),
+    re.compile(r"ssh://git@github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?"),
+)
 _MAX_PROMPT_DIFF_BYTES = 256 * 1024
 _MAX_REVIEWER_STDERR_BYTES = 1024
 _REVIEWER_TIMEOUT_SECONDS = 300
@@ -130,6 +135,19 @@ def _git(repo_dir: Path, *args: str) -> str:
     ).stdout.strip()
 
 
+def _origin_repository(repo_dir: Path) -> str:
+    try:
+        origin = _git(repo_dir, "remote", "get-url", "origin")
+    except subprocess.CalledProcessError as error:
+        message = error.stderr.strip() or error.stdout.strip() or str(error)
+        raise ReviewError(f"git origin lookup failed: {message}") from error
+    for pattern in _ORIGIN_PATTERNS:
+        match = pattern.fullmatch(origin)
+        if match:
+            return "/".join(match.groups())
+    raise ReviewError("origin URL must be a supported GitHub repository URL")
+
+
 def load_context(repo_dir: Path, manifest_path: Path) -> dict:
     try:
         manifest = json.loads(manifest_path.read_text())
@@ -189,6 +207,8 @@ def load_context(repo_dir: Path, manifest_path: Path) -> dict:
 def revalidate_context(context: dict) -> None:
     """Fail closed unless the checkout still matches all manifest Git bindings."""
     try:
+        if _origin_repository(context["repo_dir"]) != context["repository"]:
+            raise ReviewError("origin repository does not match manifest")
         if _git(context["repo_dir"], "rev-parse", "HEAD") != context["head_sha"]:
             raise ReviewError("HEAD does not match manifest")
         if _git(context["repo_dir"], "rev-parse", context["base_ref"]) != context["base_sha"]:
@@ -432,35 +452,34 @@ def _artifact_path(context: dict, role: str) -> Path:
 
 
 def persist_artifacts(context: dict, artifacts: dict) -> list[Path]:
-    destinations = {role: _artifact_path(context, role) for role in _ROLES}
-    for destination in destinations.values():
-        destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary_paths = []
-    published_paths = []
+    destination_directory = _artifact_path(context, _ROLES[0]).parent
+    destination_parent = destination_directory.parent
+    staging_directory = None
     try:
-        for role, destination in destinations.items():
-            descriptor, temporary_name = tempfile.mkstemp(
-                dir=destination.parent, prefix=f".{role}.", suffix=".tmp"
-            )
-            temporary_path = Path(temporary_name)
-            temporary_paths.append(temporary_path)
+        destination_parent.mkdir(parents=True, mode=0o700)
+        os.chmod(destination_parent, 0o700)
+        if destination_directory.exists():
+            raise ReviewError("exact-SHA artifact directory already exists")
+        staging_directory = Path(
+            tempfile.mkdtemp(prefix=f".{context['head_sha']}.", dir=destination_parent)
+        )
+        os.chmod(staging_directory, 0o700)
+        for role in _ROLES:
+            artifact_path = staging_directory / f"{role}.json"
+            descriptor = os.open(artifact_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(descriptor, "w") as temporary_file:
-                os.fchmod(descriptor, 0o600)
                 json.dump(artifacts[role], temporary_file, sort_keys=True)
                 temporary_file.write("\n")
-            temporary_path.replace(destination)
-            published_paths.append(destination)
-        return list(destinations.values())
+        if destination_directory.exists():
+            raise ReviewError("exact-SHA artifact directory already exists")
+        staging_directory.replace(destination_directory)
+        staging_directory = None
+        return [_artifact_path(context, role) for role in _ROLES]
     except OSError as error:
-        for published_path in published_paths:
-            try:
-                published_path.unlink(missing_ok=True)
-            except OSError:
-                pass
         raise ReviewError(f"cannot persist artifacts: {error}") from error
     finally:
-        for temporary_path in temporary_paths:
-            temporary_path.unlink(missing_ok=True)
+        if staging_directory is not None:
+            shutil.rmtree(staging_directory, ignore_errors=True)
 
 
 def main() -> int:
@@ -477,13 +496,15 @@ def main() -> int:
         revalidate_context(context)
         ensure_private_report_root(context["report_root"])
         context["diff"] = committed_diff(context)
-        artifacts = {
-            role: run_reviewer(role, context["reviewers"][role], context, args.hermes_bin)
-            for role in _ROLES
-        }
+        revalidate_context(context)
+        artifacts = {}
+        for role in _ROLES:
+            artifacts[role] = run_reviewer(role, context["reviewers"][role], context, args.hermes_bin)
+            revalidate_context(context)
         for role in _ROLES:
             if role not in artifacts:
                 raise ReviewError(f"{role} artifact missing")
+        revalidate_context(context)
         for path in persist_artifacts(context, artifacts):
             print(path)
     except ReviewError as error:
