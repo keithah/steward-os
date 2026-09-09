@@ -250,6 +250,23 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
             self.assertTrue(output_path.is_symlink())
             self.assertEqual(target.read_text(encoding="utf-8"), "keep")
 
+    def test_cli_rejects_dangling_symlink_output_target_without_replacing_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_directory = Path(directory) / "scorecards"
+            output_directory.mkdir(mode=0o700)
+            findings_path = Path(directory) / "findings.json"
+            findings_path.write_text("[]", encoding="utf-8")
+            output_path = output_directory / "score.json"
+            output_path.symlink_to(Path(directory) / "missing-target.json")
+            from steward_review_benchmark import main
+
+            with self.assertRaisesRegex(ValueError, "regular"):
+                main([
+                    "--cases", str(FIXTURE), "--findings", str(findings_path),
+                    "--output", str(output_path),
+                ])
+            self.assertTrue(output_path.is_symlink())
+
     def test_cli_cleans_temporary_scorecard_after_write_error(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output_directory = Path(directory) / "scorecards"

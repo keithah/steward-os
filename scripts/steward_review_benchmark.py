@@ -222,10 +222,14 @@ def write_private_scorecard(output: Path, score: dict[str, Any]) -> None:
     """Atomically persist a scorecard in an owner-private output directory."""
     _prepare_private_output_directory(output)
     try:
-        if output.exists() and not stat.S_ISREG(output.lstat().st_mode):
-            raise ValueError("output target must be a regular file")
+        output_stat = output.lstat()
+    except FileNotFoundError:
+        pass
     except OSError as error:
         raise ValueError(f"cannot inspect output target: {error}") from error
+    else:
+        if not stat.S_ISREG(output_stat.st_mode):
+            raise ValueError("output target must be a regular file")
 
     temporary = output.parent / f".{output.name}.{uuid.uuid4().hex}.tmp"
     try:
