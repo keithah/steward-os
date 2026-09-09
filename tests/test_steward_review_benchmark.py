@@ -6,9 +6,12 @@ import copy
 import contextlib
 import io
 import json
+import os
+import stat
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -193,6 +196,75 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
             with contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit):
                     main(["--cases", str(FIXTURE), "--findings", str(findings_path), "--output", "score.json"])
+
+    def test_cli_creates_owner_private_output_parents_and_scorecard(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_directory = Path(directory) / "private" / "scorecards"
+            findings_path = Path(directory) / "findings.json"
+            findings_path.write_text("[]", encoding="utf-8")
+            from steward_review_benchmark import main
+
+            output_path = output_directory / "score.json"
+            self.assertEqual(main([
+                "--cases", str(FIXTURE), "--findings", str(findings_path),
+                "--output", str(output_path),
+            ]), 0)
+
+            for path in (Path(directory) / "private", output_directory):
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(output_path.stat().st_mode), 0o600)
+
+    def test_cli_rejects_nonprivate_existing_output_directory_without_chmodding(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_directory = Path(directory) / "scorecards"
+            output_directory.mkdir(mode=0o755)
+            os.chmod(output_directory, 0o755)
+            findings_path = Path(directory) / "findings.json"
+            findings_path.write_text("[]", encoding="utf-8")
+            from steward_review_benchmark import main
+
+            with self.assertRaisesRegex(ValueError, "owner-private"):
+                main([
+                    "--cases", str(FIXTURE), "--findings", str(findings_path),
+                    "--output", str(output_directory / "score.json"),
+                ])
+            self.assertEqual(stat.S_IMODE(output_directory.stat().st_mode), 0o755)
+
+    def test_cli_rejects_symlink_output_target_without_replacing_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_directory = Path(directory) / "scorecards"
+            output_directory.mkdir(mode=0o700)
+            findings_path = Path(directory) / "findings.json"
+            findings_path.write_text("[]", encoding="utf-8")
+            target = Path(directory) / "target.json"
+            target.write_text("keep", encoding="utf-8")
+            output_path = output_directory / "score.json"
+            output_path.symlink_to(target)
+            from steward_review_benchmark import main
+
+            with self.assertRaisesRegex(ValueError, "regular"):
+                main([
+                    "--cases", str(FIXTURE), "--findings", str(findings_path),
+                    "--output", str(output_path),
+                ])
+            self.assertTrue(output_path.is_symlink())
+            self.assertEqual(target.read_text(encoding="utf-8"), "keep")
+
+    def test_cli_cleans_temporary_scorecard_after_write_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_directory = Path(directory) / "scorecards"
+            output_directory.mkdir(mode=0o700)
+            findings_path = Path(directory) / "findings.json"
+            findings_path.write_text("[]", encoding="utf-8")
+            from steward_review_benchmark import main
+
+            with mock.patch("steward_review_benchmark.os.replace", side_effect=OSError("disk full")):
+                with self.assertRaisesRegex(ValueError, "cannot write scorecard"):
+                    main([
+                        "--cases", str(FIXTURE), "--findings", str(findings_path),
+                        "--output", str(output_directory / "score.json"),
+                    ])
+            self.assertEqual(list(output_directory.glob(".score.json.*.tmp")), [])
 
 
 if __name__ == "__main__":

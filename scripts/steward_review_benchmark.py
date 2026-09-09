@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import stat
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -183,6 +186,68 @@ def _private_output_path(value: str) -> Path:
     raise argparse.ArgumentTypeError("output path must be outside the working tree")
 
 
+def _require_owner_private_directory(path: Path) -> None:
+    try:
+        path_stat = path.lstat()
+    except OSError as error:
+        raise ValueError(f"cannot inspect output directory: {error}") from error
+    if (
+        not stat.S_ISDIR(path_stat.st_mode)
+        or path_stat.st_uid != os.getuid()
+        or stat.S_IMODE(path_stat.st_mode) & 0o077
+    ):
+        raise ValueError("output directory must be owner-private")
+
+
+def _prepare_private_output_directory(output: Path) -> None:
+    _private_output_path(str(output))
+    missing_directories: list[Path] = []
+    directory = output.parent
+    while not directory.exists():
+        missing_directories.append(directory)
+        directory = directory.parent
+    for directory in reversed(missing_directories):
+        try:
+            directory.mkdir(mode=0o700)
+            os.chmod(directory, 0o700)
+        except FileExistsError:
+            pass
+        except OSError as error:
+            raise ValueError(f"cannot create output directory: {error}") from error
+        _require_owner_private_directory(directory)
+    _require_owner_private_directory(output.parent)
+
+
+def write_private_scorecard(output: Path, score: dict[str, Any]) -> None:
+    """Atomically persist a scorecard in an owner-private output directory."""
+    _prepare_private_output_directory(output)
+    try:
+        if output.exists() and not stat.S_ISREG(output.lstat().st_mode):
+            raise ValueError("output target must be a regular file")
+    except OSError as error:
+        raise ValueError(f"cannot inspect output target: {error}") from error
+
+    temporary = output.parent / f".{output.name}.{uuid.uuid4().hex}.tmp"
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as temporary_file:
+            json.dump(score, temporary_file, indent=2, sort_keys=True)
+            temporary_file.write("\n")
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.replace(temporary, output)
+    except OSError as error:
+        raise ValueError(f"cannot write scorecard: {error}") from error
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", required=True, type=Path)
@@ -195,8 +260,7 @@ def main(argv: list[str] | None = None) -> int:
     if not isinstance(findings, list):
         raise ValueError("reviewer findings must be a JSON list")
     score = score_cases(cases, findings)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(score, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_private_scorecard(args.output, score)
     return 0
 
 
