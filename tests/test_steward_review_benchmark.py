@@ -207,9 +207,9 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
     def test_cli_requires_an_absolute_private_output_path(self) -> None:
         cases = load_cases(FIXTURE)
         with tempfile.TemporaryDirectory() as directory:
-            findings_path = Path(directory) / "findings.json"
+            findings_path = Path(directory).resolve() / "findings.json"
             findings_path.write_text("[]", encoding="utf-8")
-            output_path = Path(directory) / "score.json"
+            output_path = Path(directory).resolve() / "score.json"
             from steward_review_benchmark import main
 
             self.assertEqual(main([
@@ -223,8 +223,8 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
 
     def test_cli_creates_owner_private_output_parents_and_scorecard(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            output_directory = Path(directory) / "private" / "scorecards"
-            findings_path = Path(directory) / "findings.json"
+            output_directory = Path(directory).resolve() / "private" / "scorecards"
+            findings_path = Path(directory).resolve() / "findings.json"
             findings_path.write_text("[]", encoding="utf-8")
             from steward_review_benchmark import main
 
@@ -234,16 +234,39 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
                 "--output", str(output_path),
             ]), 0)
 
-            for path in (Path(directory) / "private", output_directory):
+            for path in (Path(directory).resolve() / "private", output_directory):
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
             self.assertEqual(stat.S_IMODE(output_path.stat().st_mode), 0o600)
 
+    def test_cli_rejects_intermediate_lexical_output_symlink_before_redirected_scorecard_write(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_root = Path(directory).resolve()
+            redirected = temporary_root / "private-redirected"
+            redirected.mkdir(mode=0o700)
+            nested = redirected / "nested"
+            nested.mkdir(mode=0o700)
+            output_link = temporary_root / "output-link"
+            output_link.symlink_to(redirected, target_is_directory=True)
+            findings_path = temporary_root / "findings.json"
+            findings_path.write_text("[]", encoding="utf-8")
+            from steward_review_benchmark import main
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit):
+                    main([
+                        "--cases", str(FIXTURE), "--findings", str(findings_path),
+                        "--output", str(output_link / "nested" / "score.json"),
+                    ])
+            self.assertIn("lexical symlink", stderr.getvalue())
+            self.assertFalse((nested / "score.json").exists())
+
     def test_cli_rejects_nonprivate_existing_output_directory_without_chmodding(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            output_directory = Path(directory) / "scorecards"
+            output_directory = Path(directory).resolve() / "scorecards"
             output_directory.mkdir(mode=0o755)
             os.chmod(output_directory, 0o755)
-            findings_path = Path(directory) / "findings.json"
+            findings_path = Path(directory).resolve() / "findings.json"
             findings_path.write_text("[]", encoding="utf-8")
             from steward_review_benchmark import main
 
@@ -256,46 +279,52 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
 
     def test_cli_rejects_symlink_output_target_without_replacing_it(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            output_directory = Path(directory) / "scorecards"
+            output_directory = Path(directory).resolve() / "scorecards"
             output_directory.mkdir(mode=0o700)
-            findings_path = Path(directory) / "findings.json"
+            findings_path = Path(directory).resolve() / "findings.json"
             findings_path.write_text("[]", encoding="utf-8")
-            target = Path(directory) / "target.json"
+            target = Path(directory).resolve() / "target.json"
             target.write_text("keep", encoding="utf-8")
             output_path = output_directory / "score.json"
             output_path.symlink_to(target)
             from steward_review_benchmark import main
 
-            with self.assertRaisesRegex(ValueError, "regular"):
-                main([
-                    "--cases", str(FIXTURE), "--findings", str(findings_path),
-                    "--output", str(output_path),
-                ])
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit):
+                    main([
+                        "--cases", str(FIXTURE), "--findings", str(findings_path),
+                        "--output", str(output_path),
+                    ])
+            self.assertIn("lexical symlink", stderr.getvalue())
             self.assertTrue(output_path.is_symlink())
             self.assertEqual(target.read_text(encoding="utf-8"), "keep")
 
     def test_cli_rejects_dangling_symlink_output_target_without_replacing_it(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            output_directory = Path(directory) / "scorecards"
+            output_directory = Path(directory).resolve() / "scorecards"
             output_directory.mkdir(mode=0o700)
-            findings_path = Path(directory) / "findings.json"
+            findings_path = Path(directory).resolve() / "findings.json"
             findings_path.write_text("[]", encoding="utf-8")
             output_path = output_directory / "score.json"
-            output_path.symlink_to(Path(directory) / "missing-target.json")
+            output_path.symlink_to(Path(directory).resolve() / "missing-target.json")
             from steward_review_benchmark import main
 
-            with self.assertRaisesRegex(ValueError, "regular"):
-                main([
-                    "--cases", str(FIXTURE), "--findings", str(findings_path),
-                    "--output", str(output_path),
-                ])
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit):
+                    main([
+                        "--cases", str(FIXTURE), "--findings", str(findings_path),
+                        "--output", str(output_path),
+                    ])
+            self.assertIn("lexical symlink", stderr.getvalue())
             self.assertTrue(output_path.is_symlink())
 
     def test_cli_cleans_temporary_scorecard_after_write_error(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            output_directory = Path(directory) / "scorecards"
+            output_directory = Path(directory).resolve() / "scorecards"
             output_directory.mkdir(mode=0o700)
-            findings_path = Path(directory) / "findings.json"
+            findings_path = Path(directory).resolve() / "findings.json"
             findings_path.write_text("[]", encoding="utf-8")
             from steward_review_benchmark import main
 

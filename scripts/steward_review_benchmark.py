@@ -196,11 +196,33 @@ def score_cases(cases: list[dict[str, Any]], reviewer_findings: list[dict[str, A
     }
 
 
+def _reject_lexical_symlink_components(path: Path) -> None:
+    """Reject existing symlinks in an absolute output path before any resolution."""
+    prefix = Path(path.anchor)
+    for component in path.parts[1:]:
+        prefix /= component
+        try:
+            prefix_stat = prefix.lstat()
+        except FileNotFoundError:
+            return
+        except OSError as error:
+            raise ValueError(f"cannot inspect output path: {error}") from error
+        if stat.S_ISLNK(prefix_stat.st_mode):
+            raise ValueError(
+                "output path contains a lexical symlink component; "
+                "scorecard output must remain a regular file"
+            )
+
+
 def _private_output_path(value: str) -> Path:
     output = Path(value)
-    repository = Path(__file__).resolve().parents[1]
     if not output.is_absolute():
         raise argparse.ArgumentTypeError("output path must be absolute")
+    try:
+        _reject_lexical_symlink_components(output)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+    repository = Path(__file__).resolve().parents[1]
     try:
         output.resolve().relative_to(repository.resolve())
     except ValueError:
