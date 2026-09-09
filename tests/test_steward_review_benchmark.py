@@ -59,6 +59,8 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
             "https://example.test/path?next=/login",
             "https://example.test/?redirect=/private/area",
             "//cdn.example.test/app",
+            "https://user@example.test/?next=/login",
+            "https://[2001:db8::1]/?next=/login",
         ):
             url_case = copy.deepcopy(case)
             url_case["hypothesis"] = f"A valid URL: {url}"

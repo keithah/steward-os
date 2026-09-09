@@ -124,6 +124,39 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(manifest["status"], "blocked")
         self.assertIn("no repository-specific review configuration", manifest["evidence_gaps"])
 
+    def test_builtin_state_root_rejects_lexical_symlinks_before_manifest_write(self):
+        redirected_state = self.root / "redirected-state"
+        redirected_state.mkdir(mode=0o700)
+        redirected_state.chmod(0o700)
+        final_link = self.root / "final-state-link"
+        final_link.symlink_to(redirected_state, target_is_directory=True)
+        intermediate_parent = self.root / "intermediate-parent"
+        intermediate_parent.mkdir(mode=0o700)
+        intermediate_parent.chmod(0o700)
+        intermediate_link = intermediate_parent / "state-link"
+        intermediate_link.symlink_to(redirected_state, target_is_directory=True)
+
+        for state_root in (final_link, intermediate_link / "runtime"):
+            with self.subTest(state_root=state_root):
+                result = self.run_runner(
+                    env={**os.environ, "STEWARD_STATE_ROOT": str(state_root)}
+                )
+
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("built-in state root must not traverse a symlink", result.stderr)
+                self.assertFalse((redirected_state / "reports").exists())
+                self.assertFalse((redirected_state / "manifests").exists())
+
+        ordinary_root = self.root / "ordinary-state"
+        result = self.run_runner(env={**os.environ, "STEWARD_STATE_ROOT": str(ordinary_root)})
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        manifest = json.loads(Path(result.stdout.strip()).read_text())
+        self.assertEqual(manifest["status"], "blocked")
+        for path in (ordinary_root, ordinary_root / "reports", ordinary_root / "manifests"):
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
+
     def test_rejects_nonprivate_global_policy_root_before_manifest_write(self):
         policy_root = self.policy_root()
         self.write_policy(policy_root)

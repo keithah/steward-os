@@ -10,6 +10,7 @@ import stat
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 VALID_DEFECT_CLASSES = frozenset({
     "capability-boundary",
@@ -42,10 +43,7 @@ _TOKEN_PATTERN = re.compile(
 _ABSOLUTE_PATH_PATTERN = re.compile(
     r"(?<![A-Za-z0-9+.-])/(?!/)|(?<![A-Za-z0-9])[A-Za-z]:[\\/]|(?<!\\)\\\\[^\\/]+[\\/]"
 )
-_URL_SPAN_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9+.-])(?:https://|//)"
-    r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]+)?(?:/[^\s]*)?"
-)
+_URL_CANDIDATE_PATTERN = re.compile(r"(?<![A-Za-z0-9+.-])(?:https:)?//[^\s]+")
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _PROBE_SEPARATORS = re.compile(r"[_\s]+")
 _ROLE_PROBE_TO_CORPUS_PROBES = {
@@ -90,6 +88,23 @@ def normalize_probe_id(value: str) -> str:
     return _PROBE_SEPARATORS.sub("-", value.strip().lower())
 
 
+def _remove_recognized_url_spans(value: str) -> str:
+    """Remove complete valid HTTPS or protocol-relative URL spans for path scanning."""
+    def replace(match: re.Match[str]) -> str:
+        candidate = match.group()
+        try:
+            parsed = urlsplit(candidate, scheme="https")
+            hostname = parsed.hostname
+            parsed.port
+        except ValueError:
+            return candidate
+        if parsed.scheme != "https" or not parsed.netloc or not hostname:
+            return candidate
+        return ""
+
+    return _URL_CANDIDATE_PATTERN.sub(replace, value)
+
+
 def _validate_redaction(value: Any, path: tuple[str, ...] = ()) -> None:
     """Reject raw review content, secrets, and live paths at every nesting level."""
     location = ".".join(path) or "<root>"
@@ -104,7 +119,7 @@ def _validate_redaction(value: Any, path: tuple[str, ...] = ()) -> None:
     elif isinstance(value, str):
         if _TOKEN_PATTERN.search(value):
             raise ValueError(f"token-like string is not permitted at {location}")
-        non_url_text = _URL_SPAN_PATTERN.sub("", value)
+        non_url_text = _remove_recognized_url_spans(value)
         if _ABSOLUTE_PATH_PATTERN.search(non_url_text):
             raise ValueError(f"absolute path is not permitted at {location}")
 

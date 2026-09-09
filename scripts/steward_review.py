@@ -151,13 +151,15 @@ def _builtin_state_root() -> Path:
     root = Path(override)
     if not root.is_absolute():
         raise ReviewError("STEWARD_STATE_ROOT must be absolute")
-    return root.resolve()
+    return root
 
 
 def _prepare_builtin_state_root(repo_dir: Path) -> Path:
     """Create a private baseline root without altering any existing directory."""
     state_root = _builtin_state_root()
-    if _is_inside(state_root, repo_dir):
+    validate_lexical_path(state_root, "built-in state root")
+    resolved_state_root = state_root.resolve()
+    if _is_inside(resolved_state_root, repo_dir):
         raise ReviewError("built-in state root must be outside reviewed checkout")
     secure_directory_chain(state_root, "built-in state root")
     return state_root
