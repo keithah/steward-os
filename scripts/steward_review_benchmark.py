@@ -178,19 +178,23 @@ def score_cases(cases: list[dict[str, Any]], reviewer_findings: list[dict[str, A
         for case in cases
     ]
     expected = set().union(*expected_by_case)
-    matched_case_ids = [
-        case["id"] for case, probes in zip(cases, expected_by_case)
-        if probes & set(finding_ids)
-    ]
-    missed_case_ids = [case["id"] for case in cases if case["id"] not in matched_case_ids]
+    matched_probe_ids = [probe_id for probe_id in finding_ids if probe_id in expected]
+    candidate_case_ids_by_probe = {
+        probe_id: [
+            case["id"] for case, probes in zip(cases, expected_by_case) if probe_id in probes
+        ]
+        for probe_id in matched_probe_ids
+    }
     unexpected_findings = [probe_id for probe_id in finding_ids if probe_id not in expected]
-    matched_count = len(matched_case_ids)
+    matched_count = len(matched_probe_ids)
     return {
         "cases": len(cases),
-        "matched_case_ids": matched_case_ids,
-        "missed_case_ids": missed_case_ids,
+        "matched_probe_ids": matched_probe_ids,
+        "candidate_case_ids_by_probe": candidate_case_ids_by_probe,
+        "matched_case_ids": [],
+        "missed_case_ids": [],
         "unexpected_findings": unexpected_findings,
-        "recall": matched_count / len(cases),
+        "probe_coverage": matched_count / len(expected),
         "precision_proxy": matched_count / (matched_count + len(unexpected_findings))
         if matched_count + len(unexpected_findings) else 0.0,
     }

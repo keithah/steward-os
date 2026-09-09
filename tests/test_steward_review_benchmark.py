@@ -142,7 +142,14 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
             {"probe_id": "adversarial.token-output-redirect-boundaries"},
         ])
 
-        self.assertEqual(score["matched_case_ids"], ["credential-output-redirect"])
+        self.assertEqual(score["matched_probe_ids"], [
+            "credential.output-boundary", "credential.redirect-boundary",
+        ])
+        self.assertEqual(score["candidate_case_ids_by_probe"], {
+            "credential.output-boundary": ["credential-output-redirect"],
+            "credential.redirect-boundary": ["credential-output-redirect"],
+        })
+        self.assertEqual(score["matched_case_ids"], [])
         self.assertEqual(score["unexpected_findings"], [])
 
     def test_scorer_matches_normalized_probe_ids_and_reports_unexpected(self) -> None:
@@ -177,11 +184,36 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
         ])
 
         self.assertEqual(score["cases"], 2)
-        self.assertEqual(score["matched_case_ids"], ["pagination-changing-total"])
-        self.assertEqual(score["missed_case_ids"], ["cancellation-compensation"])
+        self.assertEqual(score["matched_probe_ids"], ["pagination.changed-total"])
+        self.assertEqual(score["candidate_case_ids_by_probe"], {
+            "pagination.changed-total": ["pagination-changing-total"],
+        })
+        self.assertEqual(score["matched_case_ids"], [])
+        self.assertEqual(score["missed_case_ids"], [])
         self.assertEqual(score["unexpected_findings"], ["unrelated.probe"])
-        self.assertEqual(score["recall"], 0.5)
+        self.assertNotIn("recall", score)
+        self.assertEqual(score["probe_coverage"], 0.5)
         self.assertEqual(score["precision_proxy"], 0.5)
+
+    def test_scorer_does_not_claim_case_recall_when_one_probe_maps_to_two_cases(self) -> None:
+        case = {
+            "source": {"repository": "keithah/example", "pr": 12},
+            "revision": "0123456789abcdef0123456789abcdef01234567",
+            "language": "python", "defect_class": "snapshot-pagination",
+            "hypothesis": "Stable boundaries require snapshots.",
+            "expected_probes": ["pagination.snapshot"], "severity": "high",
+            "disposition": "remediated",
+        }
+        cases = [{**case, "id": "snapshot-case-one"}, {**case, "id": "snapshot-case-two"}]
+
+        score = score_cases(cases, [{"probe_id": "pagination.snapshot"}])
+
+        self.assertEqual(score["matched_probe_ids"], ["pagination.snapshot"])
+        self.assertEqual(score["candidate_case_ids_by_probe"], {
+            "pagination.snapshot": ["snapshot-case-one", "snapshot-case-two"],
+        })
+        self.assertEqual(score["matched_case_ids"], [])
+        self.assertNotIn("recall", score)
 
     def test_review_skill_requires_structured_primary_and_adversarial_probes(self) -> None:
         skill = (REPOSITORY / "skills" / "hermes-pr-review" / "SKILL.md").read_text(encoding="utf-8")

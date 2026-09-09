@@ -406,7 +406,8 @@ def validate_artifact(artifact: dict, role: str, reviewer: dict, context: dict) 
         raise ReviewError("provider mismatch")
     if artifact["model"] != reviewer["model"]:
         raise ReviewError("model mismatch")
-    _require_string(artifact["status"], "artifact status")
+    if artifact["status"] != "complete":
+        raise ReviewError("artifact status must be complete")
     for key in ("findings", "probes", "limitations"):
         if not isinstance(artifact[key], list):
             raise ReviewError(f"{key} must be a list")
@@ -445,12 +446,20 @@ def validate_artifact(artifact: dict, role: str, reviewer: dict, context: dict) 
         _require_normalized_string(finding["probe_id"], "finding probe_id")
         for finding in artifact["findings"]
     }
-    if any(
-        probe["status"] != "finding" or probe["probe_id"] not in finding_probe_ids
-        for probe in artifact["probes"]
-        if probe["probe_id"] in finding_probe_ids
-    ):
-        raise ReviewError("finding probe outcome required")
+    finding_probe_outcomes = {
+        probe["probe_id"] for probe in artifact["probes"] if probe["status"] == "finding"
+    }
+    if finding_probe_ids != finding_probe_outcomes:
+        raise ReviewError("findings must exactly match finding probe outcomes")
+
+
+def _reviewer_environment() -> dict[str, str]:
+    """Pass only Hermes runtime locations and locale, never ambient credentials."""
+    allowed = (
+        "PATH", "HOME", "TMPDIR", "HERMES_HOME", "HERMES_PROFILE", "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME", "XDG_CACHE_HOME", "LANG", "LC_ALL", "LC_CTYPE",
+    )
+    return {name: os.environ[name] for name in allowed if os.environ.get(name)}
 
 
 def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> dict:
@@ -489,6 +498,7 @@ def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> d
             completed = subprocess.run(
                 command,
                 cwd=prompt_dir,
+                env=_reviewer_environment(),
                 text=True,
                 capture_output=True,
                 timeout=_REVIEWER_TIMEOUT_SECONDS,
@@ -510,10 +520,12 @@ def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> d
         validate_artifact(artifact, role, reviewer, context)
         return artifact
     finally:
+        pending_exception = sys.exc_info()[0]
         try:
             shutil.rmtree(prompt_dir)
         except OSError as error:
-            raise ReviewError(f"{role} reviewer cleanup failed: {error}") from error
+            if pending_exception is None:
+                raise ReviewError(f"{role} reviewer cleanup failed: {error}") from error
 
 
 def run_secondary_reviewer(context: dict, hermes_bin: str) -> dict:

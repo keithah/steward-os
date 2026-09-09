@@ -435,15 +435,13 @@ def _global_policy_config(policy_root: Path, repo_dir: Path) -> dict:
         raise ReviewError("STEWARD_POLICY_ROOT must contain policy.json")
     policy = _read_policy_json(policy_path, "global policy")
     _require_keys(policy, {"paths", "review"}, {"paths", "review"}, "global policy")
+    repository_id = _origin_repository(repo_dir)
     config = {
-        "repository": {
-            "id": _origin_repository(repo_dir),
-            "base_ref": _default_base_ref(repo_dir),
-        },
+        "repository": {"id": repository_id},
         "paths": policy["paths"],
         "review": policy["review"],
     }
-    override_path = policy_root / "overrides" / f"{config['repository']['id'].replace('/', '__')}.json"
+    override_path = policy_root / "overrides" / f"{repository_id.replace('/', '__')}.json"
     validate_lexical_path(override_path, "policy override")
     if override_path.is_file():
         override = _read_policy_json(override_path, "policy override")
@@ -458,6 +456,8 @@ def _global_policy_config(policy_root: Path, repo_dir: Path) -> dict:
             for name, value in review_override.items():
                 _require_string_list(value, f"policy override review.{name}")
                 config["review"][name] = value
+    if "base_ref" not in config["repository"]:
+        config["repository"]["base_ref"] = _default_base_ref(repo_dir)
     validated = load_config(policy_path, repo_dir, config=config)
     review = validated["review"]
     expected_reviewers = {

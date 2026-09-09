@@ -462,6 +462,25 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(manifest["repository"], "acme/widget")
         self.assertEqual(manifest["lane"], "deep")
 
+    def test_valid_owner_override_base_ref_precedes_automatic_base_ref_discovery(self):
+        policy_root = self.policy_root()
+        self.write_policy(policy_root)
+        overrides = policy_root / "overrides"
+        overrides.mkdir(mode=0o700)
+        overrides.chmod(0o700)
+        (overrides / "acme__widget.json").write_text(json.dumps({"base_ref": "main"}))
+        import importlib.util
+        module_spec = importlib.util.spec_from_file_location("steward_review", self.runner)
+        assert module_spec and module_spec.loader
+        review_module = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(review_module)
+
+        from unittest import mock
+        with mock.patch.object(review_module, "_default_base_ref", side_effect=AssertionError("discovery")):
+            config = review_module._global_policy_config(policy_root, self.repo)
+
+        self.assertEqual(config["repository"], {"id": "acme/widget", "base_ref": "main"})
+
     def test_private_global_policy_uses_deterministic_detached_manifest_location(self):
         policy_root = self.policy_root()
         policy = self.write_policy(policy_root)

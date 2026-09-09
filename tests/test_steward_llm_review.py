@@ -60,12 +60,19 @@ class StewardLlmReviewTests(unittest.TestCase):
             args = sys.argv[1:]
             query_path = Path(args[args.index("--query-file") + 1])
             prompt = query_path.read_text()
-            with Path(os.environ["FAKE_HERMES_LOG"]).open("a") as log:
+            hermes_home = Path(os.environ["HERMES_HOME"])
+            with (hermes_home.parent / "fake-hermes-log.jsonl").open("a") as log:
                 log.write(json.dumps({
                     "args": args,
                     "cwd": os.getcwd(),
                     "prompt": prompt,
                     "query_mode": query_path.stat().st_mode & 0o777,
+                    "runtime_env": {
+                        "path": bool(os.environ.get("PATH")),
+                        "home": bool(os.environ.get("HOME")),
+                        "tmpdir": bool(os.environ.get("TMPDIR")),
+                        "unrelated_secret": "UNRELATED_TEST_SECRET" in os.environ,
+                    },
                 }) + "\\n")
             role = "primary" if '"role": "primary"' in prompt else "adversarial"
             role_probes = {
@@ -86,9 +93,9 @@ class StewardLlmReviewTests(unittest.TestCase):
                     "adversarial.process-cleanup-status-propagation",
                 ],
             }
-            behavior = os.environ["FAKE_HERMES_BEHAVIOR"]
+            behavior = hermes_home.name.removeprefix("fake-hermes-")
             if behavior == "advance-head-after-diff" and role == "primary":
-                repo = Path(os.environ["FAKE_REPO"])
+                repo = hermes_home.parent / "widget"
                 (repo / "post-diff-change.txt").write_text("changed after diff\\n")
                 os.system(f"git -C {repo} add post-diff-change.txt")
                 os.system(f"git -C {repo} commit -m post-diff-change >/dev/null")
@@ -166,6 +173,10 @@ class StewardLlmReviewTests(unittest.TestCase):
                 artifact["findings"] = [{
                     "probe_id": role_probes[role][0], "untrusted": "extra field",
                 }]
+            if behavior == "writes-unreported-finding-probe" and role == "primary":
+                artifact["findings"] = []
+            if behavior == "writes-incomplete-artifact-status" and role == "primary":
+                artifact["status"] = "incomplete"
             if behavior == "writes-private-cwd-file":
                 Path("reviewer-private-state").write_text("child state")
             print(json.dumps(artifact))
@@ -199,9 +210,7 @@ class StewardLlmReviewTests(unittest.TestCase):
             capture_output=True,
             env={
                 **os.environ,
-                "FAKE_HERMES_BEHAVIOR": behavior,
-                "FAKE_HERMES_LOG": str(self.hermes_log),
-                "FAKE_REPO": str(self.repo),
+                "HERMES_HOME": str(self.root / f"fake-hermes-{behavior}"),
                 "STEWARD_POLICY_ROOT": str(self.policy_root),
             },
         )
@@ -551,9 +560,7 @@ class StewardLlmReviewTests(unittest.TestCase):
             mock.patch.dict(
                 os.environ,
                 {
-                    "FAKE_HERMES_BEHAVIOR": "writes-valid",
-                    "FAKE_HERMES_LOG": str(self.hermes_log),
-                    "FAKE_REPO": str(self.repo),
+                    "HERMES_HOME": str(self.root / "fake-hermes-writes-valid"),
                     "STEWARD_POLICY_ROOT": str(self.policy_root),
                 },
             ),
@@ -644,6 +651,58 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertIn("primary reviewer failed", result.stderr)
         self.assertIn("KNOWN_REVIEWER_STDERR_MARKER", result.stderr)
         self.assertFalse(list(self.report_root.rglob("*.json")))
+
+    def test_cleanup_failure_preserves_reviewer_timeout_for_secondary_fallback(self):
+        context = {
+            "repository": "acme/widget", "branch": "feature/exact-state", "head_sha": self.head_sha,
+            "base_sha": self.base_sha, "merge_base_sha": self.merge_base_sha,
+            "config_revision": self.config_revision, "diff": "",
+        }
+        reviewer = self.manifest["required_reviewers"]["adversarial_candidates"][0]
+        with (
+            mock.patch.object(
+                self.review_module.subprocess, "run",
+                side_effect=subprocess.TimeoutExpired([], 300),
+            ),
+            mock.patch.object(self.review_module.shutil, "rmtree", side_effect=OSError("cleanup")),
+            self.assertRaisesRegex(self.review_module.ReviewerExecutionError, "reviewer timed out"),
+        ):
+            self.review_module.run_reviewer("adversarial", reviewer, context, "hermes")
+
+    def test_cleanup_failure_after_valid_artifact_fails_closed(self):
+        context = {
+            "repository": "acme/widget", "branch": "feature/exact-state", "head_sha": self.head_sha,
+            "base_sha": self.base_sha, "merge_base_sha": self.merge_base_sha,
+            "config_revision": self.config_revision, "diff": "",
+        }
+        reviewer = self.manifest["required_reviewers"]["primary"]
+        artifact = {
+            "repository": context["repository"], "head_sha": context["head_sha"],
+            "base_sha": context["base_sha"], "merge_base_sha": context["merge_base_sha"],
+            "config_revision": context["config_revision"], "role": "primary",
+            "provider": reviewer["provider"], "model": reviewer["model"], "status": "complete",
+            "findings": [], "limitations": [],
+            "probes": [{"probe_id": probe_id, "status": "passed", "evidence": "checked"}
+                       for probe_id, _ in self.review_module._ROLE_PROBES["primary"]],
+        }
+        completed = subprocess.CompletedProcess([], 0, json.dumps(artifact), "")
+        with (
+            mock.patch.object(self.review_module.subprocess, "run", return_value=completed),
+            mock.patch.object(self.review_module.shutil, "rmtree", side_effect=OSError("cleanup")),
+            self.assertRaisesRegex(self.review_module.ReviewError, "reviewer cleanup failed"),
+        ):
+            self.review_module.run_reviewer("primary", reviewer, context, "hermes")
+
+    def test_fake_reviewer_observes_minimal_environment_without_unrelated_secrets(self):
+        with mock.patch.dict(os.environ, {"UNRELATED_TEST_SECRET": "injected"}):
+            result = self.run_orchestrator()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        invocations = [json.loads(line) for line in self.hermes_log.read_text().splitlines()]
+        for invocation in invocations:
+            self.assertEqual(invocation["runtime_env"], {
+                "path": True, "home": True, "tmpdir": True, "unrelated_secret": False,
+            })
 
     def test_rejects_missing_report_root(self):
         self.manifest.pop("report_root")
@@ -813,6 +872,20 @@ class StewardLlmReviewTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("complete", result.stderr)
+        self.assertFalse(list(self.report_root.rglob("*.json")))
+
+    def test_rejects_unreported_finding_probe_before_persisting_artifacts(self):
+        result = self.run_orchestrator("writes-unreported-finding-probe")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("finding", result.stderr)
+        self.assertFalse(list(self.report_root.rglob("*.json")))
+
+    def test_rejects_incomplete_artifact_status_before_persisting_artifacts(self):
+        result = self.run_orchestrator("writes-incomplete-artifact-status")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("artifact status", result.stderr)
         self.assertFalse(list(self.report_root.rglob("*.json")))
 
     def test_accepts_complete_clean_primary_and_adversarial_probe_coverage(self):
