@@ -236,12 +236,14 @@ def builtin_config(repo_dir: Path) -> dict:
     }
 
 
-def load_config(path: Path, repo_dir: Path) -> dict:
-    """Run a Steward review helper."""
-    try:
-        config = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as error:
-        raise ReviewError(f"cannot read configuration: {error}") from error
+def load_config(path: Path, repo_dir: Path, config: Optional[dict] = None) -> dict:
+    """Validate a private review configuration object against its checked-out origin."""
+    if config is None:
+        try:
+            config = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as error:
+            raise ReviewError(f"cannot read configuration: {error}") from error
+    assert config is not None
 
     _require_keys(config, {"repository", "paths", "review"}, {"repository", "paths", "review"}, "configuration")
 
@@ -319,6 +321,97 @@ def load_config(path: Path, repo_dir: Path) -> dict:
             raise ReviewError("safe commands that execute reviewed code require a sandbox runtime")
 
     return config
+
+
+def _private_policy_root(repo_dir: Path) -> Optional[Path]:
+    """Resolve and validate the optional owner-private global policy root."""
+    configured = os.environ.get("STEWARD_POLICY_ROOT")
+    if configured is None:
+        return None
+    root = Path(configured)
+    if not root.is_absolute():
+        raise ReviewError("STEWARD_POLICY_ROOT must be absolute")
+    root = root.resolve()
+    if _is_inside(root, repo_dir.resolve()):
+        raise ReviewError("STEWARD_POLICY_ROOT must be outside reviewed checkout")
+    try:
+        root_stat = root.stat()
+    except OSError as error:
+        raise ReviewError(f"cannot inspect STEWARD_POLICY_ROOT: {error}") from error
+    if (
+        not stat.S_ISDIR(root_stat.st_mode)
+        or root_stat.st_uid != os.getuid()
+        or stat.S_IMODE(root_stat.st_mode) & 0o077
+    ):
+        raise ReviewError("STEWARD_POLICY_ROOT must be owner-private")
+    return root
+
+
+def _read_policy_json(path: Path, label: str) -> dict:
+    """Read a private policy file and reject non-object or malformed contents."""
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise ReviewError(f"cannot read {label}: {error}") from error
+    if not isinstance(value, dict):
+        raise ReviewError(f"{label} must be an object")
+    return value
+
+
+def _global_policy_config(policy_root: Path, repo_dir: Path) -> dict:
+    """Build validated configuration from origin-derived identity and owner policy."""
+    policy_path = (policy_root / "policy.json").resolve()
+    if not _is_inside(policy_path, policy_root) or not policy_path.is_file():
+        raise ReviewError("STEWARD_POLICY_ROOT must contain policy.json")
+    policy = _read_policy_json(policy_path, "global policy")
+    _require_keys(policy, {"paths", "review"}, {"paths", "review"}, "global policy")
+    config = {
+        "repository": {
+            "id": _origin_repository(repo_dir),
+            "base_ref": _default_base_ref(repo_dir),
+        },
+        "paths": policy["paths"],
+        "review": policy["review"],
+    }
+    override_path = policy_root / "overrides" / f"{config['repository']['id'].replace('/', '__')}.json"
+    if override_path.is_file():
+        override = _read_policy_json(override_path, "policy override")
+        _require_keys(override, {"base_ref", "review"}, set(override), "policy override")
+        if "base_ref" in override:
+            _require_nonblank_string(override["base_ref"], "policy override.base_ref")
+            config["repository"]["base_ref"] = override["base_ref"]
+        if "review" in override:
+            review_override = override["review"]
+            allowed = {"sensitive_paths", "visual_paths", "deep_paths"}
+            _require_keys(review_override, allowed, set(review_override), "policy override review")
+            for name, value in review_override.items():
+                _require_string_list(value, f"policy override review.{name}")
+                config["review"][name] = value
+    validated = load_config(policy_path, repo_dir, config=config)
+    review = validated["review"]
+    expected_reviewers = {
+        "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
+        "adversarial": {"provider": "openai-codex", "model": "gpt-5.6-terra"},
+    }
+    if review.get("reviewers") != expected_reviewers:
+        raise ReviewError("global policy reviewers must pin Opus primary and GPT Terra adversarial")
+    if review["commands"]:
+        raise ReviewError("global policy must not configure commands")
+    if (
+        review["execute_contributor_code"]
+        or review["sandbox_available"]
+        or review["safe_commands_execute_reviewed_code"]
+    ):
+        raise ReviewError("global policy must not enable reviewed-code execution")
+    return validated
+
+
+def load_global_policy(repo_dir: Path) -> Optional[dict]:
+    """Load optional global policy without making reviewed repositories policy roots."""
+    policy_root = _private_policy_root(repo_dir)
+    if policy_root is None:
+        return None
+    return _global_policy_config(policy_root, repo_dir)
 
 
 def git_state(repo_dir: Path, base_ref: str) -> dict:
@@ -569,8 +662,12 @@ def main() -> int:
         if config_path is None and args.config_dir is not None:
             config_path = resolve_config_path(args.config_dir, repo_dir)
         if config_path is None:
-            config = builtin_config(repo_dir)
-            config_source = "builtin-default"
+            config = load_global_policy(repo_dir)
+            if config is None:
+                config = builtin_config(repo_dir)
+                config_source = "builtin-default"
+            else:
+                config_source = "private-global-policy"
         else:
             config_path = config_path.resolve()
             if _is_inside(config_path, repo_dir):

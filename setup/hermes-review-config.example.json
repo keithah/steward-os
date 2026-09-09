@@ -1,15 +1,12 @@
 {
-  "repository": {
-    "id": "owner/repository",
-    "base_ref": "main"
-  },
-  "paths": {
-    "report_root": "/private/steward-os/reports",
-    "manifest_root": "/private/steward-os/manifests"
-  },
+  "base_ref": "main",
   "review": {
-    "sensitive_paths": [],
-    "visual_paths": [],
+    "sensitive_paths": [
+      "auth/**"
+    ],
+    "visual_paths": [
+      "web/**"
+    ],
     "deep_paths": [
       "scripts/**",
       "steward_runtime/**",
@@ -22,27 +19,6 @@
       "**/*.yaml",
       "*.yml",
       "**/*.yml"
-    ],
-    "reviewers": {
-      "primary": {
-        "provider": "anthropic",
-        "model": "claude-opus-4-6"
-      },
-      "adversarial": {
-        "provider": "openai-codex",
-        "model": "gpt-5.6-terra"
-      }
-    },
-    "execute_contributor_code": false,
-    "sandbox_available": false,
-    "command_timeout_seconds": 300,
-    "safe_commands_execute_reviewed_code": false,
-    "commands": [
-      {
-        "id": "test",
-        "command": "python3 -m unittest",
-        "execution": "disabled"
-      }
     ]
   }
 }

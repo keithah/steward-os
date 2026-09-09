@@ -1,0 +1,32 @@
+{
+  "paths": {
+    "report_root": "<absolute-private-report-root>",
+    "manifest_root": "<absolute-private-manifest-root>"
+  },
+  "review": {
+    "sensitive_paths": [
+      "auth/**"
+    ],
+    "visual_paths": [
+      "web/**"
+    ],
+    "deep_paths": [
+      "**"
+    ],
+    "reviewers": {
+      "primary": {
+        "provider": "anthropic",
+        "model": "claude-opus-4-6"
+      },
+      "adversarial": {
+        "provider": "openai-codex",
+        "model": "gpt-5.6-terra"
+      }
+    },
+    "execute_contributor_code": false,
+    "sandbox_available": false,
+    "command_timeout_seconds": 300,
+    "safe_commands_execute_reviewed_code": false,
+    "commands": []
+  }
+}

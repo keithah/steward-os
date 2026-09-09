@@ -10,26 +10,23 @@ The Hermes PR review gate produces local-only, exact-SHA review evidence before 
 
 ## Install the public procedure
 
-Keep this repository public-safe. Store live configuration, manifests, reports, credentials, repository inventories, and host-specific paths outside the reviewed checkout and outside this repository. Configuration is optional only for **local diagnostic evidence**: a built-in configuration deliberately produces a blocked manifest, because it cannot establish project-specific quality evidence. Its default evidence root is `~/.config/steward-os/runtime/`.
+Keep this repository public-safe. Store live policy, manifests, reports, credentials, repository inventories, and host-specific paths outside the reviewed checkout and outside this repository. Without a policy, the built-in configuration deliberately produces a blocked diagnostic manifest under `~/.config/steward-os/runtime/`; it cannot establish project-specific quality evidence.
 
 1. Make the runner available from a trusted checkout of this repository.
-2. Run it against a clean GitHub checkout. With no private configuration it discovers the local default branch, records evidence under `~/.config/steward-os/runtime/`, uses the deep lane, and runs no commands from the checkout.
-3. Optionally copy [`setup/hermes-review-config.example.json`](../../setup/hermes-review-config.example.json) to a private configuration directory when you need custom state roots, lane patterns, or trusted deterministic checks. Do not put secrets, tokens, hostnames, or live local paths in public files.
-4. Load [`skills/hermes-pr-review/SKILL.md`](../../skills/hermes-pr-review/SKILL.md) in Hermes for the review procedure.
+2. Create one owner-private directory outside every reviewed checkout. Copy [`setup/hermes-review-policy.example.json`](../../setup/hermes-review-policy.example.json) to `policy.json` there, replacing its path placeholders only in that private copy. The root must be owner-owned and mode `0700` (or stricter).
+3. Set `STEWARD_POLICY_ROOT` to that private directory and run the collector against any clean supported-GitHub checkout. The runner derives `repository.id` from the checkout's `origin`, discovers the local default base ref, uses the policy's lane globs and exact dual-reviewer contract, and runs no reviewed-code commands.
+4. Optionally add `overrides/owner__repository.json` under the same private root using [`setup/hermes-review-config.example.json`](../../setup/hermes-review-config.example.json). An override may contain only `base_ref` and lane path lists; it cannot replace repository identity, state roots, reviewers, execution flags, or commands.
+5. Load [`skills/hermes-pr-review/SKILL.md`](../../skills/hermes-pr-review/SKILL.md) in Hermes for the review procedure.
 
 Reviewer provider/model identifiers are private operator policy, not credentials: the selected identities are primary `anthropic`/`claude-opus-4-6` and adversarial `openai-codex`/`gpt-5.6-terra`. No credential value belongs in JSON.
 
-A sanitized configuration has this complete shape:
+The private `policy.json` has this complete shape (the public path strings are placeholders, not usable host paths):
 
 ```json
 {
-  "repository": {
-    "id": "owner/repository",
-    "base_ref": "main"
-  },
   "paths": {
-    "report_root": "/private/steward-os/reports",
-    "manifest_root": "/private/steward-os/manifests"
+    "report_root": "<absolute-private-report-root>",
+    "manifest_root": "<absolute-private-manifest-root>"
   },
   "review": {
     "sensitive_paths": ["auth/**"],
@@ -54,9 +51,7 @@ A sanitized configuration has this complete shape:
 }
 ```
 
-The runner accepts only `safe`, `sandbox`, and `disabled` command execution modes. `safe` commands are trusted operator-configured deterministic commands and run on the host with `command_timeout_seconds`, an integer from 1 through 3600. Set `safe_commands_execute_reviewed_code` to `true` when a safe command would import, execute, or otherwise run files from the reviewed checkout; this runner rejects that configuration until a locked-down sandbox runtime is integrated. A contributor does not gain host execution by changing the repository. This first public runner has no integrated sandbox runtime: a `sandbox` command remains skipped while either sandbox flag is false, and configuration is rejected if both `execute_contributor_code` and `sandbox_available` are true for a sandbox command.
-
-All state roots must be absolute, distinct, owner-owned, and outside the reviewed checkout. Existing report and manifest roots must have no group or other permission bits; the runner rejects nonprivate roots without changing their mode. New roots are created as `0700`. The runner accepts no environment interpolation or secret values. The `config_revision` field is the SHA-256 of the canonical JSON configuration.
+The runner accepts only `safe`, `sandbox`, and `disabled` command execution modes for legacy explicit private configurations. A global policy must set `commands` to `[]` and all reviewed-code execution flags to `false`; it has no integrated sandbox runtime. All state roots must be absolute, distinct, owner-owned, and outside the reviewed checkout. Existing report and manifest roots must have no group or other permission bits; the runner rejects nonprivate roots without changing their mode. New roots are created as `0700`. The runner accepts no environment interpolation or secret values. The `config_revision` field is the SHA-256 of the canonical resolved configuration.
 
 ## Run the evidence collector
 
@@ -66,7 +61,7 @@ From the public runner checkout, invoke the runner with a clean target repositor
 python3 scripts/steward_review.py --repo-dir /path/to/repository
 ```
 
-To override the baseline, add `--config /private/steward-os/repositories/owner__repository.json` or `--config-dir /private/steward-os/repositories`. The runner refuses a dirty checkout, invalid optional configuration, a mismatched origin/config identity, state roots inside the checkout, a post-command Git-state change, failed eligible commands, **or any skipped/missing project quality evidence**. Each eligible host command is bounded by `command_timeout_seconds`; a timeout is recorded as failed and produces a `blocked` manifest. It writes a manifest only after valid Git/configuration state is resolved.
+With `STEWARD_POLICY_ROOT` set, no per-repository configuration is required: the runner loads `<policy-root>/policy.json`, derives the identity from origin, and optionally reads only `<policy-root>/overrides/owner__repository.json`. It refuses a nonprivate policy root, policy contents containing a repository ID, an invalid override, state roots inside the checkout, a post-command Git-state change, failed eligible legacy commands, **or any skipped/missing project quality evidence**. Without a policy it retains the blocked built-in diagnostic baseline. Each eligible legacy host command is bounded by `command_timeout_seconds`; a timeout is recorded as failed and produces a `blocked` manifest. It writes a manifest only after valid Git/policy state is resolved.
 
 The manifest is local-only JSON at:
 
@@ -98,7 +93,7 @@ No verified blocker found in this Steward pass.
 
 ## `steward` and `run steward`
 
-`steward` is the terminal entrypoint. It runs the local runner first, using the safe built-in baseline when no per-repository override exists; only a ready manifest may be passed to Hermes for the public `hermes-pr-review` procedure. It must not use GitHub write operations.
+`steward` is the terminal entrypoint. It runs the local runner first, using the owner-private global policy when `STEWARD_POLICY_ROOT` is configured and the blocked built-in baseline otherwise; only a ready manifest may be passed to Hermes for the public `hermes-pr-review` procedure. It must not use GitHub write operations.
 
 `run steward` is the chat invocation of the same gate on the current committed branch. Hermes runs the local runner, reads the resulting manifest, and follows the public procedure. It is read-only with respect to GitHub objects and writes only its local report outside the public checkout.
 

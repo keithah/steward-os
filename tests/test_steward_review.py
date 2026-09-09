@@ -94,19 +94,45 @@ class StewardReviewTests(unittest.TestCase):
         """Exercise the Steward review gate behavior."""
         self.config_path.write_text(json.dumps(self.config))
 
-    def run_runner(self):
+    def run_runner(self, *, env=None, config_path=None):
         """Exercise the Steward review gate behavior."""
-        return subprocess.run(
-            [
-                sys.executable,
-                str(self.runner),
-                "--repo-dir",
-                str(self.repo),
-                "--config",
-                str(self.config_path),
-            ],
-            text=True,
-            capture_output=True,
+        command = [
+            sys.executable,
+            str(self.runner),
+            "--repo-dir",
+            str(self.repo),
+        ]
+        if config_path is not False:
+            command.extend(["--config", str(self.config_path if config_path is None else config_path)])
+        return subprocess.run(command, text=True, capture_output=True, env=env)
+
+    def write_global_policy(self, policy_root):
+        """Write an owner-private policy with no repository-controlled values."""
+        policy_root.mkdir(mode=0o700)
+        policy_root.chmod(0o700)
+        (policy_root / "policy.json").write_text(
+            json.dumps(
+                {
+                    "paths": {
+                        "report_root": str(self.root / "global-reports"),
+                        "manifest_root": str(self.root / "global-manifests"),
+                    },
+                    "review": {
+                        "sensitive_paths": ["auth/**"],
+                        "visual_paths": ["web/**"],
+                        "deep_paths": ["**"],
+                        "reviewers": {
+                            "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
+                            "adversarial": {"provider": "openai-codex", "model": "gpt-5.6-terra"},
+                        },
+                        "execute_contributor_code": False,
+                        "sandbox_available": False,
+                        "command_timeout_seconds": 300,
+                        "safe_commands_execute_reviewed_code": False,
+                        "commands": [],
+                    },
+                }
+            )
         )
 
     def read_manifest(self):
@@ -680,18 +706,21 @@ class StewardReviewTests(unittest.TestCase):
             with self.subTest(location="reference", value=value):
                 self.assertIn(value, reference_content)
 
-    def test_public_example_contains_only_reviewer_identities_not_credentials(self):
-        """The checked-in example pins identities without credential-shaped fields."""
-        example_path = Path(__file__).resolve().parents[1] / "setup" / "hermes-review-config.example.json"
-        example = json.loads(example_path.read_text())
-        reviewers = example["review"]["reviewers"]
+    def test_public_examples_separate_narrow_override_from_global_identity_policy(self):
+        """Public templates keep repository overrides narrow and credential-free."""
+        root = Path(__file__).resolve().parents[1]
+        override = json.loads((root / "setup" / "hermes-review-config.example.json").read_text())
+        policy = json.loads((root / "setup" / "hermes-review-policy.example.json").read_text())
+        self.assertEqual(set(override), {"base_ref", "review"})
+        self.assertEqual(set(override["review"]), {"sensitive_paths", "visual_paths", "deep_paths"})
         self.assertEqual(
-            reviewers,
+            policy["review"]["reviewers"],
             {
                 "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
                 "adversarial": {"provider": "openai-codex", "model": "gpt-5.6-terra"},
             },
         )
+        self.assertEqual(policy["review"]["commands"], [])
 
         def walk(value):
             if isinstance(value, dict):
@@ -703,10 +732,10 @@ class StewardReviewTests(unittest.TestCase):
                     yield from walk(nested)
 
         forbidden_key_fragments = ("token", "secret", "credential", "password", "api_key", "oauth_value")
-        keys = [key.lower() for key in walk(example)]
+        keys = [key.lower() for key in walk(policy)]
         self.assertFalse(
             [key for key in keys if any(fragment in key for fragment in forbidden_key_fragments)],
-            "public config must not contain credential fields",
+            "public policy must not contain credential fields",
         )
 
     def test_requires_two_reviewers_for_deep_lane(self):
@@ -880,6 +909,124 @@ class StewardReviewTests(unittest.TestCase):
                 result = self.run_runner()
                 self.assertNotEqual(result.returncode, 0, result.stderr)
                 self.assertFalse(list(self.manifest_root.rglob("*.json")))
+
+    def test_private_global_policy_produces_ready_manifests_for_origin_identities(self):
+        """One private policy covers distinct origins without repository files."""
+        policy_root = self.root / "policy"
+        self.write_global_policy(policy_root)
+        env = {
+            **os.environ,
+            "STEWARD_POLICY_ROOT": str(policy_root),
+            "STEWARD_STATE_ROOT": str(self.root / "fallback-state"),
+        }
+
+        first = self.run_runner(env=env, config_path=False)
+        first_manifest = json.loads(Path(first.stdout.strip()).read_text())
+        self.run_git("remote", "set-url", "origin", "https://github.com/acme/other.git")
+        second = self.run_runner(env=env, config_path=False)
+        second_manifest = json.loads(Path(second.stdout.strip()).read_text())
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(first_manifest["repository"], "acme/widget")
+        self.assertEqual(second_manifest["repository"], "acme/other")
+        self.assertEqual(first_manifest["config_source"], "private-global-policy")
+        self.assertEqual(second_manifest["config_source"], "private-global-policy")
+        self.assertEqual(first_manifest["required_reviewers"], {
+            "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
+            "adversarial": {"provider": "openai-codex", "model": "gpt-5.6-terra"},
+        })
+
+    def test_rejects_nonprivate_global_policy_root(self):
+        """The owner policy root cannot be a shared directory."""
+        policy_root = self.root / "policy"
+        self.write_global_policy(policy_root)
+        policy_root.chmod(0o755)
+
+        result = self.run_runner(
+            env={
+                **os.environ,
+                "STEWARD_POLICY_ROOT": str(policy_root),
+                "STEWARD_STATE_ROOT": str(self.root / "fallback-state"),
+            },
+            config_path=False,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("STEWARD_POLICY_ROOT must be owner-private", result.stderr)
+        self.assertFalse((self.root / "global-manifests").exists())
+
+    def test_rejects_global_policy_repository_id_and_weakening_override(self):
+        """Global identity is derived and overrides cannot lower command safety."""
+        policy_root = self.root / "policy"
+        self.write_global_policy(policy_root)
+        policy = json.loads((policy_root / "policy.json").read_text())
+        policy["repository"] = {"id": "acme/other"}
+        (policy_root / "policy.json").write_text(json.dumps(policy))
+        env = {
+            **os.environ,
+            "STEWARD_POLICY_ROOT": str(policy_root),
+            "STEWARD_STATE_ROOT": str(self.root / "fallback-state"),
+        }
+
+        mismatched = self.run_runner(env=env, config_path=False)
+        self.assertEqual(mismatched.returncode, 1)
+        self.assertIn("global policy contains unknown keys: repository", mismatched.stderr)
+
+        policy.pop("repository")
+        (policy_root / "policy.json").write_text(json.dumps(policy))
+        overrides = policy_root / "overrides"
+        overrides.mkdir(mode=0o700)
+        overrides.chmod(0o700)
+        (overrides / "acme__widget.json").write_text(
+            json.dumps({"review": {"commands": [{"id": "unsafe", "command": "true", "execution": "safe"}]}})
+        )
+
+        weakened = self.run_runner(env=env, config_path=False)
+        self.assertEqual(weakened.returncode, 1)
+        self.assertIn("policy override review contains unknown keys: commands", weakened.stderr)
+
+    def test_rejects_executable_global_policy(self):
+        """The shared policy never supplies commands that run reviewed code."""
+        policy_root = self.root / "policy"
+        self.write_global_policy(policy_root)
+        policy = json.loads((policy_root / "policy.json").read_text())
+        policy["review"]["commands"] = [
+            {"id": "reviewed", "command": "python3 -m unittest", "execution": "safe"}
+        ]
+        (policy_root / "policy.json").write_text(json.dumps(policy))
+
+        result = self.run_runner(
+            env={
+                **os.environ,
+                "STEWARD_POLICY_ROOT": str(policy_root),
+                "STEWARD_STATE_ROOT": str(self.root / "fallback-state"),
+            },
+            config_path=False,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("global policy must not configure commands", result.stderr)
+
+    def test_rejects_global_policy_without_pinned_dual_reviewer_identities(self):
+        """The global contract cannot omit or substitute either reviewer identity."""
+        policy_root = self.root / "policy"
+        self.write_global_policy(policy_root)
+        policy = json.loads((policy_root / "policy.json").read_text())
+        policy["review"]["reviewers"]["adversarial"]["model"] = "grok-4.6"
+        (policy_root / "policy.json").write_text(json.dumps(policy))
+
+        result = self.run_runner(
+            env={
+                **os.environ,
+                "STEWARD_POLICY_ROOT": str(policy_root),
+                "STEWARD_STATE_ROOT": str(self.root / "fallback-state"),
+            },
+            config_path=False,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("global policy reviewers must pin Opus primary and GPT Terra adversarial", result.stderr)
 
 
 if __name__ == "__main__":
