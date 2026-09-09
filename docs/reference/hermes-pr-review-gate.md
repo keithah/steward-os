@@ -15,7 +15,7 @@ Keep this repository public-safe. Store live policy, manifests, reports, credent
 1. Make the runner available from a trusted checkout of this repository.
 2. Create one owner-private directory outside every reviewed checkout. Copy [`setup/hermes-review-policy.example.json`](../../setup/hermes-review-policy.example.json) to `policy.json` there, replacing its path placeholders only in that private copy. The root must be owner-owned and mode `0700` (or stricter).
 3. Set `STEWARD_POLICY_ROOT` to that private directory and run the collector against any clean supported-GitHub checkout. The runner derives `repository.id` from the checkout's `origin`, discovers the local default base ref, uses the policy's lane globs and exact dual-reviewer contract, and runs no reviewed-code commands.
-4. Optionally add `overrides/owner__repository.json` under the same private root using [`setup/hermes-review-config.example.json`](../../setup/hermes-review-config.example.json). An override may contain only `base_ref` and lane path lists; it cannot replace repository identity, state roots, reviewers, execution flags, or commands.
+4. Optionally add `overrides/owner__repository.json` under the same private root using [`setup/hermes-review-config.example.json`](../../setup/hermes-review-config.example.json). An override may contain only `base_ref` and lane path lists; it cannot replace repository identity, state roots, reviewers, execution flags, or commands. Complete per-repository configuration is forbidden.
 5. Load [`skills/hermes-pr-review/SKILL.md`](../../skills/hermes-pr-review/SKILL.md) in Hermes for the review procedure.
 
 Reviewer provider/model identifiers are private operator policy, not credentials: the selected identities are primary `anthropic`/`claude-opus-4-6` and adversarial `openai-codex`/`gpt-5.6-terra`. No credential value belongs in JSON.
@@ -40,28 +40,23 @@ The private `policy.json` has this complete shape (the public path strings are p
     "sandbox_available": false,
     "command_timeout_seconds": 300,
     "safe_commands_execute_reviewed_code": false,
-    "commands": [
-      {
-        "id": "test",
-        "command": "python3 -m unittest",
-        "execution": "disabled"
-      }
-    ]
+    "commands": []
   }
 }
 ```
 
-The runner accepts only `safe`, `sandbox`, and `disabled` command execution modes for legacy explicit private configurations. A global policy must set `commands` to `[]` and all reviewed-code execution flags to `false`; it has no integrated sandbox runtime. All state roots must be absolute, distinct, owner-owned, and outside the reviewed checkout. Existing report and manifest roots must have no group or other permission bits; the runner rejects nonprivate roots without changing their mode. New roots are created as `0700`. The runner accepts no environment interpolation or secret values. The `config_revision` field is the SHA-256 of the canonical resolved configuration.
+The global policy must set `commands` to `[]` and all reviewed-code execution flags to `false`; it has no integrated sandbox runtime. All state roots must be absolute, distinct, owner-owned, and outside the reviewed checkout. Existing report and manifest roots must have no group or other permission bits; the runner rejects nonprivate roots without changing their mode. New roots are created as `0700`. The runner accepts no environment interpolation or secret values. The `config_revision` field is the SHA-256 of the canonical resolved configuration.
 
 ## Run the evidence collector
 
-From the public runner checkout, invoke the runner with a clean target repository:
+From the public runner checkout, invoke the runner with a clean target repository and owner-private policy:
 
 ```sh
-python3 scripts/steward_review.py --repo-dir /path/to/repository
+STEWARD_POLICY_ROOT=/private/steward-os/policy \
+  python3 scripts/steward_review.py --repo-dir /path/to/repository
 ```
 
-With `STEWARD_POLICY_ROOT` set, no per-repository configuration is required: the runner loads `<policy-root>/policy.json`, derives the identity from origin, and optionally reads only `<policy-root>/overrides/owner__repository.json`. It refuses a nonprivate policy root, policy contents containing a repository ID, an invalid override, state roots inside the checkout, a post-command Git-state change, failed eligible legacy commands, **or any skipped/missing project quality evidence**. Without a policy it retains the blocked built-in diagnostic baseline. Each eligible legacy host command is bounded by `command_timeout_seconds`; a timeout is recorded as failed and produces a `blocked` manifest. It writes a manifest only after valid Git/policy state is resolved.
+With `STEWARD_POLICY_ROOT` set, no per-repository configuration is required: the runner loads `<policy-root>/policy.json`, derives the identity from origin, and optionally reads only `<policy-root>/overrides/owner__repository.json`. It refuses a nonprivate policy root, policy contents containing a repository ID, an invalid override, state roots inside the checkout, or any command/reviewed-code execution policy. `--config` and `--config-dir` are rejected before any manifest output or write. Without a policy it retains the blocked built-in diagnostic baseline. It writes a manifest only after valid Git/policy state is resolved.
 
 The manifest is local-only JSON at:
 

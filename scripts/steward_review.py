@@ -121,16 +121,6 @@ def _origin_repository(repo_dir: Path) -> str:
         raise ReviewError(f"git command failed: {message}") from error
 
 
-def resolve_config_path(config_dir: Path, repo_dir: Path) -> Optional[Path]:
-    """Run a Steward review helper."""
-    repository = _origin_repository(repo_dir)
-    owner, name = repository.split("/", 1)
-    path = config_dir / f"{owner}__{name}.json"
-    if not path.is_file():
-        return None
-    return path
-
-
 def _default_base_ref(repo_dir: Path) -> str:
     """Choose the checked-out repository's remote default branch without fetching."""
     remote_head = subprocess.run(
@@ -652,28 +642,15 @@ def main() -> int:
     """Run a Steward review helper."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-dir", required=True, type=Path)
-    config_group = parser.add_mutually_exclusive_group()
-    config_group.add_argument("--config", type=Path)
-    config_group.add_argument("--config-dir", type=Path)
     args = parser.parse_args()
     try:
         repo_dir = args.repo_dir.resolve()
-        config_path = args.config
-        if config_path is None and args.config_dir is not None:
-            config_path = resolve_config_path(args.config_dir, repo_dir)
-        if config_path is None:
-            config = load_global_policy(repo_dir)
-            if config is None:
-                config = builtin_config(repo_dir)
-                config_source = "builtin-default"
-            else:
-                config_source = "private-global-policy"
+        config = load_global_policy(repo_dir)
+        if config is None:
+            config = builtin_config(repo_dir)
+            config_source = "builtin-default"
         else:
-            config_path = config_path.resolve()
-            if _is_inside(config_path, repo_dir):
-                raise ReviewError("configuration path must be outside the reviewed checkout")
-            config = load_config(config_path, repo_dir)
-            config_source = "private-override"
+            config_source = "private-global-policy"
         manifest = git_state(repo_dir, config["repository"]["base_ref"])
         if config_source == "builtin-default":
             _prepare_builtin_state_root(repo_dir)

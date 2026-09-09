@@ -38,10 +38,10 @@ class StewardLlmReviewTests(unittest.TestCase):
             "status": "ready",
             "report_root": str(self.report_root),
             "required_reviewers": {
-                "primary": {"provider": "primary-provider", "model": "primary-model"},
+                "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
                 "adversarial": {
-                    "provider": "adversarial-provider",
-                    "model": "adversarial-model",
+                    "provider": "openai-codex",
+                    "model": "gpt-5.6-terra",
                 },
             },
         }
@@ -109,8 +109,8 @@ class StewardLlmReviewTests(unittest.TestCase):
                 "merge_base_sha": "__MERGE_BASE_SHA__",
                 "config_revision": "__CONFIG_REVISION__",
                 "role": role,
-                "provider": f"{role}-provider",
-                "model": f"{role}-model",
+                "provider": {"primary": "anthropic", "adversarial": "openai-codex"}[role],
+                "model": {"primary": "claude-opus-4-6", "adversarial": "gpt-5.6-terra"}[role],
                 "status": "complete",
                 "findings": [{"probe_id": role_probes[role][0]}],
                 "probes": [{
@@ -221,9 +221,10 @@ class StewardLlmReviewTests(unittest.TestCase):
             run_git("commit", "-m", "feature")
 
         manifest_root = self.root / "manifests"
-        config_path = self.root / "config.json"
-        config_path.write_text(json.dumps({
-            "repository": {"id": "acme/widget", "base_ref": "main"},
+        policy_root = self.root / "policy"
+        policy_root.mkdir(mode=0o700, exist_ok=True)
+        policy_root.chmod(0o700)
+        (policy_root / "policy.json").write_text(json.dumps({
             "paths": {
                 "report_root": str(self.report_root),
                 "manifest_root": str(manifest_root),
@@ -232,7 +233,10 @@ class StewardLlmReviewTests(unittest.TestCase):
                 "sensitive_paths": ["auth/**"],
                 "visual_paths": ["web/**"],
                 "deep_paths": ["feature.txt"] if lane == "deep" else [],
-                "reviewers": self.manifest["required_reviewers"],
+                "reviewers": {
+                    "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
+                    "adversarial": {"provider": "openai-codex", "model": "gpt-5.6-terra"},
+                },
                 "execute_contributor_code": False,
                 "sandbox_available": False,
                 "command_timeout_seconds": 30,
@@ -247,11 +251,10 @@ class StewardLlmReviewTests(unittest.TestCase):
                 str(review_runner),
                 "--repo-dir",
                 str(self.repo),
-                "--config",
-                str(config_path),
             ],
             text=True,
             capture_output=True,
+            env={**os.environ, "STEWARD_POLICY_ROOT": str(policy_root)},
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.manifest_path = Path(result.stdout.strip())
@@ -377,7 +380,7 @@ class StewardLlmReviewTests(unittest.TestCase):
     def test_accepts_fast_manifest_with_exactly_one_primary_artifact(self):
         self.manifest["lane"] = "fast"
         self.manifest["required_reviewers"] = {
-            "primary": {"provider": "primary-provider", "model": "primary-model"},
+            "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
         }
         self.write_manifest()
 
@@ -392,7 +395,7 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertEqual(len(invocations), 1)
         self.assertEqual(
             invocations[0]["args"][invocations[0]["args"].index("--provider") + 1],
-            "primary-provider",
+            "anthropic",
         )
 
     def test_accepts_fast_manifest_generated_by_the_review_runner(self):
@@ -412,7 +415,7 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertEqual(len(invocations), 1)
         self.assertEqual(
             invocations[0]["args"][invocations[0]["args"].index("--provider") + 1],
-            "primary-provider",
+            "anthropic",
         )
 
     def test_requires_both_primary_and_adversarial_artifacts(self):
@@ -577,8 +580,14 @@ class StewardLlmReviewTests(unittest.TestCase):
                 "--safe-mode", "--toolsets", "context_engine", "--max-turns", "1", "--oneshot"
             ):
                 self.assertIn(argument, args)
-            self.assertEqual(args[args.index("--provider") + 1], f"{role}-provider")
-            self.assertEqual(args[args.index("--model") + 1], f"{role}-model")
+            self.assertEqual(
+                args[args.index("--provider") + 1],
+                {"primary": "anthropic", "adversarial": "openai-codex"}[role],
+            )
+            self.assertEqual(
+                args[args.index("--model") + 1],
+                {"primary": "claude-opus-4-6", "adversarial": "gpt-5.6-terra"}[role],
+            )
             self.assertIn("Make no GitHub writes", invocation["prompt"])
             self.assertIn("Do not execute reviewed code", invocation["prompt"])
 
