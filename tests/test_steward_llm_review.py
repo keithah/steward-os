@@ -129,6 +129,8 @@ class StewardLlmReviewTests(unittest.TestCase):
             if behavior == "writes-disallowed-candidate" and role == "adversarial":
                 artifact["provider"] = "untrusted"
                 artifact["model"] = "substituted"
+            if behavior == "writes-mismatched-opus-provider" and provider == "anthropic":
+                artifact["provider"] = "untrusted"
             if behavior == "writes-mismatched-sha" and role == "primary":
                 artifact["head_sha"] = "e" * 40
             if behavior == "writes-mismatched-role" and role == "primary":
@@ -506,11 +508,11 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertIn("adversarial artifact missing", result.stderr)
         self.assertFalse(list(self.report_root.rglob("*.json")))
 
-    def test_rejects_artifact_outside_permitted_secondary_candidates(self):
+    def test_fails_closed_for_artifact_outside_permitted_secondary_candidates(self):
         result = self.run_orchestrator("writes-disallowed-candidate")
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("secondary candidate mismatch", result.stderr)
+        self.assertIn("provider mismatch", result.stderr)
         self.assertFalse(list(self.report_root.rglob("*.json")))
 
     def test_falls_through_from_opus_to_grok_and_preserves_selected_artifact_identity(self):
@@ -529,6 +531,22 @@ class StewardLlmReviewTests(unittest.TestCase):
         ])
         artifact = json.loads(next(self.report_root.rglob("adversarial.json")).read_text())
         self.assertEqual((artifact["provider"], artifact["model"]), ("xai-oauth", "grok-4.6"))
+
+    def test_fails_closed_when_opus_returns_an_artifact_with_a_mismatched_provider(self):
+        result = self.run_orchestrator("writes-mismatched-opus-provider")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("provider mismatch", result.stderr)
+        self.assertFalse(list(self.report_root.rglob("*.json")))
+        invocations = [json.loads(line) for line in self.hermes_log.read_text().splitlines()]
+        selected = [
+            (entry["args"][entry["args"].index("--provider") + 1], entry["args"][entry["args"].index("--model") + 1])
+            for entry in invocations
+        ]
+        self.assertEqual(selected, [
+            ("openai-codex", "gpt-6-astra"),
+            ("anthropic", "claude-opus-4-6"),
+        ])
 
     def test_rejects_malformed_json_artifact(self):
         result = self.run_orchestrator("writes-malformed-json")

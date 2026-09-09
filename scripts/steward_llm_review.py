@@ -18,6 +18,10 @@ class ReviewError(Exception):
     pass
 
 
+class ReviewerExecutionError(ReviewError):
+    """A candidate could not complete its reviewer process."""
+
+
 _LANE_ROLES = {
     "fast": ("primary",),
     "deep": ("primary", "adversarial"),
@@ -489,15 +493,15 @@ def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> d
                 .strip()
             )
             if diagnostic:
-                raise ReviewError(f"{role} reviewer failed: {diagnostic}")
-            raise ReviewError(f"{role} reviewer failed")
+                raise ReviewerExecutionError(f"{role} reviewer failed: {diagnostic}")
+            raise ReviewerExecutionError(f"{role} reviewer failed")
         artifact = parse_only_json(completed.stdout, role)
         validate_artifact(artifact, role, reviewer, context)
         return artifact
     except subprocess.TimeoutExpired as error:
-        raise ReviewError(f"{role} reviewer timed out") from error
+        raise ReviewerExecutionError(f"{role} reviewer timed out") from error
     except OSError as error:
-        raise ReviewError(f"{role} reviewer failed: {error}") from error
+        raise ReviewerExecutionError(f"{role} reviewer failed: {error}") from error
     finally:
         shutil.rmtree(prompt_dir, ignore_errors=True)
 
@@ -508,10 +512,8 @@ def run_secondary_reviewer(context: dict, hermes_bin: str) -> dict:
     for candidate in context["reviewers"]["adversarial_candidates"]:
         try:
             return run_reviewer("adversarial", candidate, context, hermes_bin)
-        except ReviewError as error:
+        except ReviewerExecutionError as error:
             failures.append(str(error))
-    if all(message in {"provider mismatch", "model mismatch"} for message in failures):
-        raise ReviewError("secondary candidate mismatch")
     raise ReviewError("all secondary reviewer candidates failed: " + "; ".join(failures))
 
 
