@@ -9,9 +9,10 @@ Use this procedure only for a clean, committed branch. It creates local review e
 
 ## Safety boundary
 
-- Review configuration, manifests, and reports are local-only state and must remain outside the public checkout.
-- Runner commands are trusted operator configured deterministic commands. Do not treat contributor-authored commands as trusted.
-- Host `safe` commands may not execute or import reviewed-checkout code; configurations must declare `safe_commands_execute_reviewed_code: true` for that case, which this runner rejects until a locked-down sandbox runtime is integrated. `sandbox` commands are likewise unsupported: with either sandbox flag false they are skipped; with both flags true the configuration is rejected rather than running on the host.
+- A ready review requires `STEWARD_POLICY_ROOT`: an absolute, owner-owned, mode-`0700` (or stricter) directory outside the reviewed checkout. It contains the private `policy.json`; without it, the runner's built-in result is diagnostic and `blocked`.
+- The runner derives repository identity from the reviewed checkout's supported GitHub `origin`. The private policy must not set a repository ID. Per-repository files are optional narrow overrides at `overrides/<owner>__<repository>.json` and may set only `base_ref` and lane path globs (`sensitive_paths`, `visual_paths`, `deep_paths`). They may not set paths, reviewers, execution flags, commands, or repository identity.
+- The ready-policy reviewer identities are fixed: primary `anthropic` / `claude-opus-4-6`; adversarial `openai-codex` / `gpt-5.6-terra`. The policy has distinct owner-private report and manifest roots and no commands or reviewed-code execution.
+- **Never use, accept, suggest, or pass `--config` or `--config-dir`.** A complete per-repository configuration is forbidden and the runner rejects those flags before manifest output or write.
 - For this procedure, do not create or alter any GitHub object: no PRs, comments, reviews, approvals, labels, merges, pushes, releases, deployments, or settings changes.
 - This public skill is read-only: do not execute, import, build, test, or otherwise run reviewed-checkout code. Do not write to the reviewed checkout.
 
@@ -46,17 +47,14 @@ Use stable, normalized `probe_id` values for findings. Each applicable probe rec
 ## Procedure
 
 1. Confirm the target repository is clean and identify its committed `HEAD`. Do not stash, reset, commit, or otherwise mutate it to make it reviewable.
-2. Invoke the runner for that checkout. With no private configuration, it uses
-   its safe built-in baseline: GitHub origin/local-default-branch discovery,
-   private evidence storage under `~/.config/steward-os/runtime/`, the deep lane,
-   and no configured commands:
+2. Confirm `STEWARD_POLICY_ROOT` names the owner-private policy root, then invoke the runner without configuration flags:
 
    ```sh
-   python3 scripts/steward_review.py --repo-dir /path/to/repository
+   STEWARD_POLICY_ROOT=/private/steward-os/policy \
+     python3 scripts/steward_review.py --repo-dir /path/to/repository
    ```
 
-   An optional trusted operator configuration stored outside the public checkout
-   may override that baseline.
+   Do not replace this global-policy flow with a full repository configuration.
 3. Read the manifest path emitted by the runner. Verify its `repository`, `branch`, `base_sha`, `merge_base_sha`, `head_sha`, `lane`, and `config_revision` (the configuration revision) all bind to the branch being reviewed.
 4. If the manifest status is `blocked`, stop. Record the blocked command or validation evidence locally; do not continue to a clean conclusion.
 5. Inspect the deterministic evidence in every manifest command result and skipped check. Inspect the diff and changed paths, repository instructions, and relevant implementation and test paths. If a current PR exists, inspect its current checks and comments as read-only evidence.
