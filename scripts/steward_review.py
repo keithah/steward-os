@@ -159,38 +159,14 @@ def _prepare_builtin_state_root(repo_dir: Path) -> Path:
     state_root = _builtin_state_root()
     if _is_inside(state_root, repo_dir):
         raise ReviewError("built-in state root must be outside reviewed checkout")
-    try:
-        info = state_root.stat()
-    except FileNotFoundError:
-        try:
-            state_root.mkdir(parents=True, mode=0o700)
-        except FileExistsError:
-            return _prepare_builtin_state_root(repo_dir)
-        os.chmod(state_root, 0o700)
-        return state_root
-    if not state_root.is_dir():
-        raise ReviewError("built-in state root must be a directory")
-    if info.st_mode & 0o077:
-        raise ReviewError("existing built-in state root must be private")
+    secure_directory_chain(state_root, "built-in state root")
     return state_root
 
 
-def prepare_private_state_root(root: Path, label: str) -> None:
-    """Create a new state root privately or validate an existing one unchanged."""
+def _require_private_directory(path: Path, label: str) -> None:
+    """Reject a symlink, foreign owner, or non-private state directory."""
     try:
-        root.mkdir(parents=True, mode=0o700)
-        created = True
-    except FileExistsError:
-        created = False
-    except OSError as error:
-        raise ReviewError(f"cannot create {label}: {error}") from error
-    if created:
-        try:
-            os.chmod(root, 0o700)
-        except OSError as error:
-            raise ReviewError(f"cannot secure {label}: {error}") from error
-    try:
-        root_stat = root.stat()
+        root_stat = path.lstat()
     except OSError as error:
         raise ReviewError(f"cannot inspect {label}: {error}") from error
     if (
@@ -199,6 +175,61 @@ def prepare_private_state_root(root: Path, label: str) -> None:
         or stat.S_IMODE(root_stat.st_mode) & 0o077
     ):
         raise ReviewError(f"{label} must be owner-private")
+
+
+def secure_directory_chain(root: Path, label: str) -> None:
+    """Create every missing private state component and validate existing ones unchanged."""
+    missing = []
+    current = root
+    while True:
+        try:
+            current.lstat()
+        except FileNotFoundError:
+            missing.append(current)
+            if current.parent == current:
+                raise ReviewError(f"cannot locate existing parent for {label}")
+            current = current.parent
+            continue
+        except OSError as error:
+            raise ReviewError(f"cannot inspect {label}: {error}") from error
+        _require_private_directory(current, label)
+        break
+    for directory in reversed(missing):
+        try:
+            directory.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+        except OSError as error:
+            raise ReviewError(f"cannot create {label}: {error}") from error
+        _require_private_directory(directory, label)
+    current = root
+    while current.parent != current:
+        parent = current.parent
+        try:
+            parent_stat = parent.lstat()
+        except OSError as error:
+            raise ReviewError(f"cannot inspect {label}: {error}") from error
+        if not stat.S_ISDIR(parent_stat.st_mode):
+            raise ReviewError(f"{label} must not traverse a symlink or non-directory")
+        if parent_stat.st_uid == os.getuid() and not stat.S_IMODE(parent_stat.st_mode) & 0o077:
+            current = parent
+            continue
+        try:
+            grandparent_stat = parent.parent.lstat()
+        except OSError as error:
+            raise ReviewError(f"cannot inspect {label}: {error}") from error
+        if (
+            stat.S_ISDIR(grandparent_stat.st_mode)
+            and grandparent_stat.st_uid == os.getuid()
+            and not stat.S_IMODE(grandparent_stat.st_mode) & 0o077
+        ):
+            raise ReviewError(f"{label} must be owner-private")
+        break
+
+
+def prepare_private_state_root(root: Path, label: str) -> None:
+    """Create a private state root and every missing component beneath its private parent."""
+    secure_directory_chain(root, label)
 
 
 def builtin_config(repo_dir: Path) -> dict:
@@ -606,15 +637,10 @@ def _sanitize_branch(branch: str) -> str:
 
 def write_manifest(manifest_root: Path, manifest: dict) -> Path:
     """Run a Steward review helper."""
-    owner, repository = manifest["repository"].split("/", 1)
-    branch_segment = _sanitize_branch(manifest["branch"]) if manifest["branch"] else manifest["head_sha"]
-    destination = (
-        manifest_root
-        / f"{owner}__{repository}"
-        / f"branch-{branch_segment}"
-        / f"{manifest['head_sha']}.json"
+    destination = manifest_path(
+        manifest_root, manifest["repository"], manifest["branch"], manifest["head_sha"]
     )
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    secure_directory_chain(destination.parent, "manifest destination")
     descriptor, temporary_name = tempfile.mkstemp(
         dir=destination.parent,
         prefix=f".{destination.name}.",
@@ -630,6 +656,13 @@ def write_manifest(manifest_root: Path, manifest: dict) -> Path:
         temporary_path.unlink(missing_ok=True)
         raise
     return destination
+
+
+def manifest_path(manifest_root: Path, repository: str, branch: str, head_sha: str) -> Path:
+    """Return the deterministic private manifest location for an exact review state."""
+    owner, repository_name = repository.split("/", 1)
+    branch_segment = _sanitize_branch(branch) if branch else head_sha
+    return manifest_root / f"{owner}__{repository_name}" / f"branch-{branch_segment}" / f"{head_sha}.json"
 
 
 def _config_revision(config: dict) -> str:

@@ -1,5 +1,6 @@
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -147,6 +148,61 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("global policy reviewers must pin Opus primary and GPT Terra adversarial", result.stderr)
 
+    def test_rejects_malformed_global_policy_review_fields_before_manifest_write(self):
+        policy_root = self.policy_root()
+        for mutate in (
+            lambda policy: policy["review"].update(command_timeout_seconds="300"),
+            lambda policy: policy["review"].update(deep_paths="**"),
+            lambda policy: policy["review"].update(execute_contributor_code="false"),
+        ):
+            with self.subTest(mutate=mutate):
+                self.write_policy(policy_root, mutate=mutate)
+
+                result = self.run_runner(env=self.ready_env(policy_root))
+
+                self.assertEqual(result.returncode, 1)
+                self.assertFalse((self.root / "global-manifests").exists())
+
+    def test_creates_every_nested_global_state_component_owner_private(self):
+        policy_root = self.policy_root()
+        policy = self.write_policy(policy_root)
+        private_state = self.root / "private-state"
+        policy["paths"] = {
+            "report_root": str(private_state / "reports" / "artifacts"),
+            "manifest_root": str(private_state / "manifests" / "ready"),
+        }
+        (policy_root / "policy.json").write_text(json.dumps(policy))
+
+        manifest = self.read_manifest(self.run_runner(env=self.ready_env(policy_root)))
+
+        self.assertEqual(manifest["status"], "ready")
+        for path in (
+            private_state,
+            private_state / "reports",
+            private_state / "reports" / "artifacts",
+            private_state / "manifests",
+            private_state / "manifests" / "ready",
+            Path(manifest["report_root"]),
+            Path(manifest["report_root"]).parent,
+        ):
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
+
+    def test_rejects_nonprivate_existing_nested_state_component_without_chmodding(self):
+        policy_root = self.policy_root()
+        policy = self.write_policy(policy_root)
+        private_state = self.root / "private-state"
+        nonprivate = private_state / "manifests"
+        nonprivate.mkdir(parents=True, mode=0o755)
+        nonprivate.chmod(0o755)
+        policy["paths"]["manifest_root"] = str(nonprivate / "ready")
+        (policy_root / "policy.json").write_text(json.dumps(policy))
+
+        result = self.run_runner(env=self.ready_env(policy_root))
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("owner-private", result.stderr)
+        self.assertEqual(stat.S_IMODE(nonprivate.stat().st_mode), 0o755)
+
     def test_rejects_executable_global_policy(self):
         policy_root = self.policy_root()
         self.write_policy(policy_root, mutate=lambda policy: policy["review"].update(commands=[{"id": "test", "command": "true", "execution": "safe"}]))
@@ -186,6 +242,25 @@ class StewardReviewTests(unittest.TestCase):
         manifest = self.read_manifest(self.run_runner(env=self.ready_env(policy_root)))
         self.assertEqual(manifest["repository"], "acme/widget")
         self.assertEqual(manifest["lane"], "deep")
+
+    def test_private_global_policy_uses_deterministic_detached_manifest_location(self):
+        policy_root = self.policy_root()
+        policy = self.write_policy(policy_root)
+        head_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.repo, check=True, text=True, capture_output=True
+        ).stdout.strip()
+        self.run_git("checkout", "--detach", head_sha)
+
+        manifest = self.read_manifest(self.run_runner(env=self.ready_env(policy_root)))
+
+        expected = (
+            Path(policy["paths"]["manifest_root"])
+            / "acme__widget"
+            / f"branch-{head_sha}"
+            / f"{head_sha}.json"
+        )
+        self.assertEqual(manifest["branch"], "")
+        self.assertTrue(expected.is_file())
 
 
 if __name__ == "__main__":

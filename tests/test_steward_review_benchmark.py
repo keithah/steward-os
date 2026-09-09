@@ -79,7 +79,16 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
         nested_body["source"]["body"] = "raw bot prose"
         absolute_path = copy.deepcopy(case)
         absolute_path["hypothesis"] = "/Users/alice/work/private-repo/config.json"
-        for unsafe in (github_pat, sk_proj, sk, nested_body, absolute_path):
+        embedded_posix_path = copy.deepcopy(case)
+        embedded_posix_path["hypothesis"] = "Stored at /Users/alice/private/config.json."
+        embedded_windows_path = copy.deepcopy(case)
+        embedded_windows_path["hypothesis"] = "Stored at C:\\Users\\alice\\private\\config.json."
+        embedded_unc_path = copy.deepcopy(case)
+        embedded_unc_path["hypothesis"] = "Stored at \\\\server\\share\\private\\config.json."
+        for unsafe in (
+            github_pat, sk_proj, sk, nested_body, absolute_path, embedded_posix_path,
+            embedded_windows_path, embedded_unc_path,
+        ):
             with self.subTest(unsafe=unsafe):
                 with self.assertRaises(ValueError):
                     validate_cases([unsafe])

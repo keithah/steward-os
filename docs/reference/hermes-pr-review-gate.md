@@ -45,7 +45,7 @@ The private `policy.json` has this complete shape (the public path strings are p
 }
 ```
 
-The global policy must set `commands` to `[]` and all reviewed-code execution flags to `false`; it has no integrated sandbox runtime. All state roots must be absolute, distinct, owner-owned, and outside the reviewed checkout. Existing report and manifest roots must have no group or other permission bits; the runner rejects nonprivate roots without changing their mode. New roots are created as `0700`. The runner accepts no environment interpolation or secret values. The `config_revision` field is the SHA-256 of the canonical resolved configuration.
+The global policy must set `commands` to `[]` and all reviewed-code execution flags to `false`; it has no integrated sandbox runtime. All state roots must be absolute, distinct, owner-owned, and outside the reviewed checkout. Every state-tree component created beneath a private root is `0700`; existing components must already be owner-private and are rejected without mode changes. The runner accepts no environment interpolation or secret values. The `config_revision` field is the SHA-256 of the canonical resolved configuration.
 
 ## Run the evidence collector
 
@@ -88,7 +88,7 @@ No verified blocker found in this Steward pass.
 
 ## `steward` and `run steward`
 
-`steward` is the terminal entrypoint. It runs the local runner first, using the owner-private global policy when `STEWARD_POLICY_ROOT` is configured and the blocked built-in baseline otherwise; only a ready manifest may be passed to Hermes for the public `hermes-pr-review` procedure. It must not use GitHub write operations.
+`steward` is the terminal entrypoint. It runs the local runner first, using the owner-private global policy when `STEWARD_POLICY_ROOT` is configured and the blocked built-in baseline otherwise; only a ready manifest may be passed to Hermes for the public `hermes-pr-review` procedure. The launcher also requires `STEWARD_POLICY_ROOT` and accepts only the deterministic manifest location derived from that active policy, checkout origin, branch, and exact HEAD. It must not use GitHub write operations.
 
 `run steward` is the chat invocation of the same gate on the current committed branch. Hermes runs the local runner, reads the resulting manifest, and follows the public procedure. It is read-only with respect to GitHub objects and writes only its local report outside the public checkout.
 

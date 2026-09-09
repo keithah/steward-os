@@ -10,6 +10,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import steward_review
+
 
 class ReviewError(Exception):
     pass
@@ -152,7 +155,42 @@ def _origin_repository(repo_dir: Path) -> str:
     raise ReviewError("origin URL must be a supported GitHub repository URL")
 
 
-def load_context(repo_dir: Path, manifest_path: Path) -> dict:
+def _policy_context(repo_dir: Path) -> dict:
+    """Derive launcher bindings solely from the active owner-private policy."""
+    if os.environ.get("STEWARD_POLICY_ROOT") is None:
+        raise ReviewError("STEWARD_POLICY_ROOT is required")
+    config = steward_review.load_global_policy(repo_dir)
+    if config is None:
+        raise ReviewError("STEWARD_POLICY_ROOT is required")
+    try:
+        repository = _origin_repository(repo_dir)
+        head_sha = _git(repo_dir, "rev-parse", "HEAD")
+        branch = _git(repo_dir, "branch", "--show-current")
+        base_ref = config["repository"]["base_ref"]
+        merge_base_sha = _git(repo_dir, "merge-base", "HEAD", base_ref)
+        changed_paths = _git(repo_dir, "diff", "--name-only", merge_base_sha, "HEAD").splitlines()
+    except subprocess.CalledProcessError as error:
+        message = error.stderr.strip() or error.stdout.strip() or str(error)
+        raise ReviewError(f"cannot derive policy review state: {message}") from error
+    lane = steward_review.select_lane(changed_paths, config["review"])
+    return {
+        "repository": repository,
+        "head_sha": head_sha,
+        "branch": branch,
+        "base_ref": base_ref,
+        "config_revision": steward_review._config_revision(config),
+        "report_root": Path(config["paths"]["report_root"]).resolve(),
+        "lane": lane,
+        "reviewers": steward_review.required_reviewer_contracts(lane, config["review"]),
+        "manifest_path": steward_review.manifest_path(
+            Path(config["paths"]["manifest_root"]).resolve(), repository, branch, head_sha
+        ).resolve(),
+    }
+
+
+def load_context(repo_dir: Path, manifest_path: Path, policy: dict) -> dict:
+    if manifest_path != policy["manifest_path"]:
+        raise ReviewError("manifest path does not match active global policy")
     try:
         manifest = json.loads(manifest_path.read_text())
     except (OSError, json.JSONDecodeError) as error:
@@ -192,6 +230,21 @@ def load_context(repo_dir: Path, manifest_path: Path) -> dict:
             raise ReviewError(f"{role} reviewer contract invalid")
         _require_string(reviewer["provider"], f"{role} provider")
         _require_string(reviewer["model"], f"{role} model")
+
+    if repository != policy["repository"]:
+        raise ReviewError("repository does not match active global policy")
+    if head_sha != policy["head_sha"] or branch_value != policy["branch"]:
+        raise ReviewError("manifest Git state does not match active global policy")
+    if base_ref != policy["base_ref"]:
+        raise ReviewError("base_ref does not match active global policy")
+    if report_root != policy["report_root"]:
+        raise ReviewError("report_root does not match active global policy")
+    if lane != policy["lane"]:
+        raise ReviewError("lane does not match active global policy")
+    if reviewers != policy["reviewers"]:
+        raise ReviewError("reviewer contracts do not match active global policy")
+    if manifest.get("config_revision") != policy["config_revision"]:
+        raise ReviewError("config_revision does not match active global policy")
 
     return {
         "repo_dir": repo_dir,
@@ -306,22 +359,7 @@ def committed_diff(context: dict) -> str:
 
 
 def ensure_private_report_root(report_root: Path) -> None:
-    try:
-        report_root.mkdir(mode=0o700)
-    except FileExistsError:
-        pass
-    except OSError as error:
-        raise ReviewError(f"cannot create report_root: {error}") from error
-    try:
-        root_stat = report_root.stat()
-    except OSError as error:
-        raise ReviewError(f"cannot inspect report_root: {error}") from error
-    if (
-        not stat.S_ISDIR(root_stat.st_mode)
-        or root_stat.st_uid != os.getuid()
-        or stat.S_IMODE(root_stat.st_mode) & 0o077
-    ):
-        raise ReviewError("report_root must be owner-private")
+    steward_review.secure_directory_chain(report_root, "report_root")
 
 
 def parse_only_json(output: str, role: str) -> dict:
@@ -467,8 +505,7 @@ def persist_artifacts(context: dict, artifacts: dict) -> list[Path]:
     destination_parent = destination_directory.parent
     staging_directory = None
     try:
-        destination_parent.mkdir(parents=True, mode=0o700)
-        os.chmod(destination_parent, 0o700)
+        steward_review.secure_directory_chain(destination_parent, "artifact destination")
         if destination_directory.exists():
             raise ReviewError("exact-SHA artifact directory already exists")
         staging_directory = Path(
@@ -503,7 +540,9 @@ def main() -> int:
         repo_dir = args.repo_dir.resolve()
         if not repo_dir.is_dir():
             raise ReviewError("repo-dir must be a directory")
-        context = load_context(repo_dir, args.manifest.resolve())
+        manifest_path = args.manifest.resolve()
+        policy = _policy_context(repo_dir)
+        context = load_context(repo_dir, manifest_path, policy)
         revalidate_context(context)
         ensure_private_report_root(context["report_root"])
         context["diff"] = committed_diff(context)

@@ -17,7 +17,7 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.root = Path(self.temp_dir.name)
         self.repo = self.root / "widget"
         self.repo.mkdir()
-        self.report_root = self.root / "reports"
+        self.report_root = self.root / "private-state" / "reports"
         self.manifest_path = self.root / "manifest.json"
         self.runner = Path(__file__).resolve().parents[1] / "scripts" / "steward_llm_review.py"
         module_spec = importlib.util.spec_from_file_location("steward_llm_review", self.runner)
@@ -173,7 +173,7 @@ class StewardLlmReviewTests(unittest.TestCase):
     def write_manifest(self):
         self.manifest_path.write_text(json.dumps(self.manifest))
 
-    def run_orchestrator(self, behavior="writes-valid"):
+    def run_orchestrator(self, behavior="writes-valid", manifest_path=None):
         return subprocess.run(
             [
                 sys.executable,
@@ -181,7 +181,7 @@ class StewardLlmReviewTests(unittest.TestCase):
                 "--repo-dir",
                 str(self.repo),
                 "--manifest",
-                str(self.manifest_path),
+                str(manifest_path or self.manifest_path),
                 "--hermes-bin",
                 str(self.fake_hermes),
             ],
@@ -192,6 +192,7 @@ class StewardLlmReviewTests(unittest.TestCase):
                 "FAKE_HERMES_BEHAVIOR": behavior,
                 "FAKE_HERMES_LOG": str(self.hermes_log),
                 "FAKE_REPO": str(self.repo),
+                "STEWARD_POLICY_ROOT": str(self.policy_root),
             },
         )
 
@@ -221,10 +222,10 @@ class StewardLlmReviewTests(unittest.TestCase):
             run_git("commit", "-m", "feature")
 
         manifest_root = self.root / "manifests"
-        policy_root = self.root / "policy"
-        policy_root.mkdir(mode=0o700, exist_ok=True)
-        policy_root.chmod(0o700)
-        (policy_root / "policy.json").write_text(json.dumps({
+        self.policy_root = self.root / "policy"
+        self.policy_root.mkdir(mode=0o700, exist_ok=True)
+        self.policy_root.chmod(0o700)
+        (self.policy_root / "policy.json").write_text(json.dumps({
             "paths": {
                 "report_root": str(self.report_root),
                 "manifest_root": str(manifest_root),
@@ -254,7 +255,7 @@ class StewardLlmReviewTests(unittest.TestCase):
             ],
             text=True,
             capture_output=True,
-            env={**os.environ, "STEWARD_POLICY_ROOT": str(policy_root)},
+            env={**os.environ, "STEWARD_POLICY_ROOT": str(self.policy_root)},
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.manifest_path = Path(result.stdout.strip())
@@ -265,6 +266,21 @@ class StewardLlmReviewTests(unittest.TestCase):
             current = ready_manifest[name]
             self.fake_hermes.write_text(self.fake_hermes.read_text().replace(previous, current))
             setattr(self, name, current)
+
+    def test_rejects_forged_checkout_manifest_before_reviewer_invocation_or_artifacts(self):
+        forged = dict(self.manifest)
+        forged["required_reviewers"] = {
+            "primary": {"provider": "untrusted", "model": "substituted"},
+            "adversarial": {"provider": "untrusted", "model": "substituted"},
+        }
+        forged_path = self.repo / "forged-manifest.json"
+        forged_path.write_text(json.dumps(forged))
+
+        result = self.run_orchestrator(manifest_path=forged_path)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.hermes_log.exists())
+        self.assertFalse(list(self.report_root.rglob("*.json")))
 
     def test_accepts_ready_runner_manifest_contract(self):
         """A real ready manifest drives both fake reviewer artifact writes."""
@@ -297,7 +313,7 @@ class StewardLlmReviewTests(unittest.TestCase):
         result = self.run_orchestrator()
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("HEAD does not match manifest", result.stderr)
+        self.assertIn("manifest path does not match active global policy", result.stderr)
         self.assertFalse(self.hermes_log.exists())
         self.assertFalse(list(self.report_root.rglob("*.json")))
 
@@ -335,7 +351,7 @@ class StewardLlmReviewTests(unittest.TestCase):
         result = self.run_orchestrator()
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("origin repository does not match manifest", result.stderr)
+        self.assertIn("manifest path does not match active global policy", result.stderr)
         self.assertFalse(self.hermes_log.exists())
         self.assertFalse(list(self.report_root.rglob("*.json")))
 
@@ -350,14 +366,13 @@ class StewardLlmReviewTests(unittest.TestCase):
 
     def test_accepts_ready_detached_head_manifest_with_head_sha_branch_segment(self):
         """An exactly empty branch binds detached-head reviewer state to the validated SHA."""
-        self.manifest["branch"] = ""
-        self.write_manifest()
         subprocess.run(
             ["git", "checkout", "--detach", self.head_sha],
             cwd=self.repo,
             check=True,
             capture_output=True,
         )
+        self.write_ready_runner_manifest(initialize=False)
 
         result = self.run_orchestrator()
 
@@ -378,11 +393,7 @@ class StewardLlmReviewTests(unittest.TestCase):
             self.assertIn(f'"branch": "{self.head_sha}"', invocation["prompt"])
 
     def test_accepts_fast_manifest_with_exactly_one_primary_artifact(self):
-        self.manifest["lane"] = "fast"
-        self.manifest["required_reviewers"] = {
-            "primary": {"provider": "anthropic", "model": "claude-opus-4-6"},
-        }
-        self.write_manifest()
+        self.write_ready_runner_manifest(lane="fast", initialize=False)
 
         result = self.run_orchestrator()
 
@@ -714,18 +725,7 @@ class StewardLlmReviewTests(unittest.TestCase):
             text=True,
             capture_output=True,
         )
-        previous_head_sha = self.manifest["head_sha"]
-        self.manifest["head_sha"] = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=self.repo,
-            check=True,
-            text=True,
-            capture_output=True,
-        ).stdout.strip()
-        self.fake_hermes.write_text(
-            self.fake_hermes.read_text().replace(previous_head_sha, self.manifest["head_sha"])
-        )
-        self.write_manifest()
+        self.write_ready_runner_manifest(initialize=False)
 
         result = self.run_orchestrator()
 
@@ -749,12 +749,7 @@ class StewardLlmReviewTests(unittest.TestCase):
             ["git", "commit", "-m", "oversized diff"], cwd=self.repo, check=True,
             text=True, capture_output=True,
         )
-        head_sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=self.repo, check=True, text=True,
-            capture_output=True,
-        ).stdout.strip()
-        self.manifest["head_sha"] = head_sha
-        self.write_manifest()
+        self.write_ready_runner_manifest(initialize=False)
 
         result = self.run_orchestrator()
 
@@ -770,6 +765,21 @@ class StewardLlmReviewTests(unittest.TestCase):
         for artifact in self.report_root.rglob("*.json"):
             self.assertEqual(stat.S_IMODE(artifact.stat().st_mode), 0o600)
 
+    def test_creates_every_artifact_state_component_owner_private(self):
+        result = self.run_orchestrator()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        context = {**self.manifest, "report_root": Path(self.manifest["report_root"])}
+        destination = self.review_module._artifact_path(context, "primary").parent
+        for path in (
+            self.root / "private-state",
+            self.report_root,
+            self.report_root / "acme__widget",
+            self.report_root / "acme__widget" / "branch-feature-exact-state",
+            destination,
+        ):
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
+
     def test_rejects_preexisting_nonprivate_report_root_before_invoking_hermes(self):
         self.report_root.chmod(0o755)
 
@@ -778,6 +788,17 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("report_root must be owner-private", result.stderr)
         self.assertFalse(self.hermes_log.exists())
+
+    def test_rejects_nonprivate_existing_artifact_state_component_without_chmodding(self):
+        state_root = self.root / "private-state"
+        state_root.chmod(0o755)
+
+        result = self.run_orchestrator()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("owner-private", result.stderr)
+        self.assertFalse(self.hermes_log.exists())
+        self.assertEqual(stat.S_IMODE(state_root.stat().st_mode), 0o755)
 
 
 if __name__ == "__main__":

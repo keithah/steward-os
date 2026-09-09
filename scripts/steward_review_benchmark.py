@@ -39,7 +39,9 @@ _TOKEN_PATTERN = re.compile(
     r"|\bsk-[A-Za-z0-9_-]{48,}\b)",
     re.IGNORECASE,
 )
-_ABSOLUTE_PATH_PATTERN = re.compile(r"(?:^/|^[A-Za-z]:[\\/]|^\\\\)")
+_ABSOLUTE_PATH_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9+.-])/(?!/)|(?<![A-Za-z0-9])[A-Za-z]:[\\/]|(?<!\\)\\\\[^\\/]+[\\/]"
+)
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _PROBE_SEPARATORS = re.compile(r"[_\s]+")
 _ROLE_PROBE_TO_CORPUS_PROBES = {
