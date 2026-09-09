@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -42,6 +43,8 @@ _MAX_REVIEWER_STDERR_BYTES = 1024
 _MAX_PROBE_EVIDENCE_BYTES = 8 * 1024
 _MAX_LIMITATION_BYTES = 2 * 1024
 _REVIEWER_TIMEOUT_SECONDS = 300
+_REVIEWER_TERMINATION_GRACE_SECONDS = 1
+_REVIEWER_DRAIN_TIMEOUT_SECONDS = 1
 _MAX_FINDINGS = 64
 _MAX_LIMITATIONS = 32
 _INSTRUCTION_FILE_NAMES = ("AGENTS.md", "SOUL.md", ".cursorrules", ".hermes.md", "CLAUDE.md")
@@ -479,8 +482,39 @@ def _terminate_process_group(process: subprocess.Popen, signal_number: int) -> N
     """Signal the isolated reviewer process group if it still exists."""
     try:
         os.killpg(process.pid, signal_number)
-    except ProcessLookupError:
+    except (PermissionError, ProcessLookupError):
         pass
+
+
+def _stop_reviewer_process_group(process: subprocess.Popen) -> None:
+    """Escalate group termination without depending on leader liveness."""
+    _terminate_process_group(process, signal.SIGTERM)
+    try:
+        process.wait(timeout=_REVIEWER_TERMINATION_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        pass
+    _terminate_process_group(process, signal.SIGKILL)
+    try:
+        process.wait(timeout=_REVIEWER_TERMINATION_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _close_reviewer_streams(process: subprocess.Popen) -> None:
+    for stream in (process.stdout, process.stderr):
+        if stream is not None:
+            try:
+                stream.close()
+            except (OSError, ValueError):
+                pass
+
+
+def _join_reviewer_drains(stdout_thread: threading.Thread, stderr_thread: threading.Thread) -> bool:
+    """Wait briefly for pipe drains and report whether both completed."""
+    deadline = time.monotonic() + _REVIEWER_DRAIN_TIMEOUT_SECONDS
+    for thread in (stdout_thread, stderr_thread):
+        thread.join(timeout=max(0, deadline - time.monotonic()))
+    return not stdout_thread.is_alive() and not stderr_thread.is_alive()
 
 
 def _drain_reviewer_stream(stream, limit: int, result: dict) -> None:
@@ -528,20 +562,17 @@ def _run_reviewer_process(command: list[str], prompt_dir: Path, role: str) -> tu
         process.wait(timeout=_REVIEWER_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
         timed_out = True
-        _terminate_process_group(process, signal.SIGTERM)
-        try:
-            process.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            _terminate_process_group(process, signal.SIGKILL)
-            process.wait()
-    stdout_thread.join()
-    stderr_thread.join()
-    if process.stdout is not None:
-        process.stdout.close()
-    if process.stderr is not None:
-        process.stderr.close()
+        _stop_reviewer_process_group(process)
     if timed_out:
+        _close_reviewer_streams(process)
+        _join_reviewer_drains(stdout_thread, stderr_thread)
         raise ReviewerExecutionError(f"{role} reviewer timed out")
+    if not _join_reviewer_drains(stdout_thread, stderr_thread):
+        _stop_reviewer_process_group(process)
+        _close_reviewer_streams(process)
+        _join_reviewer_drains(stdout_thread, stderr_thread)
+        raise ReviewerExecutionError(f"{role} reviewer pipe drain timed out")
+    _close_reviewer_streams(process)
     if stdout_result["overflow"]:
         raise ReviewError(f"{role} reviewer stdout exceeds limit")
     if process.returncode:

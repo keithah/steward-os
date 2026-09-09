@@ -56,6 +56,7 @@ class StewardLlmReviewTests(unittest.TestCase):
             #!__PYTHON__
             import json
             import os
+            import signal
             import subprocess
             import sys
             import time
@@ -150,6 +151,15 @@ class StewardLlmReviewTests(unittest.TestCase):
                 raise SystemExit(0)
             if behavior == "forks-child" and role == "primary":
                 child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+                (hermes_home.parent / "reviewer-child.pid").write_text(str(child.pid))
+                time.sleep(30)
+            if behavior == "exits-on-term-leaves-term-ignoring-child" and role == "primary":
+                signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+                child = subprocess.Popen([
+                    sys.executable,
+                    "-c",
+                    "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)",
+                ])
                 (hermes_home.parent / "reviewer-child.pid").write_text(str(child.pid))
                 time.sleep(30)
             if behavior == "writes-disallowed-candidate" and role == "adversarial":
@@ -636,6 +646,37 @@ class StewardLlmReviewTests(unittest.TestCase):
             deadline = time.monotonic() + 2
             while not child_pid_path.exists() and time.monotonic() < deadline:
                 time.sleep(0.01)
+            self.assertTrue(child_pid_path.exists())
+            child_pid = int(child_pid_path.read_text())
+            with self.assertRaises(ProcessLookupError):
+                os.kill(child_pid, 0)
+        finally:
+            if child_pid_path.exists():
+                try:
+                    os.kill(int(child_pid_path.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    def test_reviewer_timeout_kills_term_ignoring_descendant_after_leader_exits(self):
+        context = {
+            "repository": "acme/widget", "branch": "feature/exact-state", "head_sha": self.head_sha,
+            "base_sha": self.base_sha, "merge_base_sha": self.merge_base_sha,
+            "config_revision": self.config_revision, "diff": "",
+        }
+        reviewer = self.manifest["required_reviewers"]["primary"]
+        child_pid_path = self.root / "reviewer-child.pid"
+        started = time.monotonic()
+        try:
+            with (
+                mock.patch.object(self.review_module, "_REVIEWER_TIMEOUT_SECONDS", 1),
+                mock.patch.dict(
+                    os.environ,
+                    {"HERMES_HOME": str(self.root / "fake-hermes-exits-on-term-leaves-term-ignoring-child")},
+                ),
+                self.assertRaisesRegex(self.review_module.ReviewerExecutionError, "reviewer timed out"),
+            ):
+                self.review_module.run_reviewer("primary", reviewer, context, str(self.fake_hermes))
+            self.assertLess(time.monotonic() - started, 4)
             self.assertTrue(child_pid_path.exists())
             child_pid = int(child_pid_path.read_text())
             with self.assertRaises(ProcessLookupError):
