@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 import os
 import stat
@@ -531,6 +532,57 @@ class StewardLlmReviewTests(unittest.TestCase):
         ])
         artifact = json.loads(next(self.report_root.rglob("adversarial.json")).read_text())
         self.assertEqual((artifact["provider"], artifact["model"]), ("xai-oauth", "grok-4.6"))
+
+    def test_fails_closed_when_opus_prompt_setup_fails_after_primary_succeeds(self):
+        original_chmod = self.review_module.os.chmod
+        prompt_chmod_calls = 0
+
+        def fail_opus_prompt_chmod(path, mode):
+            nonlocal prompt_chmod_calls
+            if Path(path).name == "review-prompt.json":
+                prompt_chmod_calls += 1
+                if prompt_chmod_calls == 2:
+                    raise OSError("forced Opus prompt chmod failure")
+            return original_chmod(path, mode)
+
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(self.review_module.os, "chmod", fail_opus_prompt_chmod),
+            mock.patch.dict(
+                os.environ,
+                {
+                    "FAKE_HERMES_BEHAVIOR": "writes-valid",
+                    "FAKE_HERMES_LOG": str(self.hermes_log),
+                    "FAKE_REPO": str(self.repo),
+                    "STEWARD_POLICY_ROOT": str(self.policy_root),
+                },
+            ),
+            mock.patch.object(
+                sys,
+                "argv",
+                [
+                    str(self.runner),
+                    "--repo-dir",
+                    str(self.repo),
+                    "--manifest",
+                    str(self.manifest_path),
+                    "--hermes-bin",
+                    str(self.fake_hermes),
+                ],
+            ),
+            mock.patch("sys.stderr", stderr),
+        ):
+            result = self.review_module.main()
+
+        self.assertNotEqual(result, 0)
+        self.assertIn("forced Opus prompt chmod failure", stderr.getvalue())
+        self.assertFalse(list(self.report_root.rglob("*.json")))
+        invocations = [json.loads(line) for line in self.hermes_log.read_text().splitlines()]
+        selected = [
+            (entry["args"][entry["args"].index("--provider") + 1], entry["args"][entry["args"].index("--model") + 1])
+            for entry in invocations
+        ]
+        self.assertEqual(selected, [("openai-codex", "gpt-6-astra")])
 
     def test_fails_closed_when_opus_returns_an_artifact_with_a_mismatched_provider(self):
         result = self.run_orchestrator("writes-mismatched-opus-provider")

@@ -454,12 +454,18 @@ def validate_artifact(artifact: dict, role: str, reviewer: dict, context: dict) 
 
 
 def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> dict:
-    prompt_dir = Path(tempfile.mkdtemp(prefix="steward-llm-review-"))
-    os.chmod(prompt_dir, 0o700)
+    try:
+        prompt_dir = Path(tempfile.mkdtemp(prefix="steward-llm-review-"))
+        os.chmod(prompt_dir, 0o700)
+    except OSError as error:
+        raise ReviewError(f"{role} reviewer prompt setup failed: {error}") from error
     prompt_path = prompt_dir / "review-prompt.json"
     try:
-        prompt_path.write_text(_prompt(role, context))
-        os.chmod(prompt_path, 0o600)
+        try:
+            prompt_path.write_text(_prompt(role, context))
+            os.chmod(prompt_path, 0o600)
+        except OSError as error:
+            raise ReviewError(f"{role} reviewer prompt setup failed: {error}") from error
         command = [
             hermes_bin,
             "chat",
@@ -479,13 +485,18 @@ def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> d
             "--query-file",
             str(prompt_path),
         ]
-        completed = subprocess.run(
-            command,
-            cwd=prompt_dir,
-            text=True,
-            capture_output=True,
-            timeout=_REVIEWER_TIMEOUT_SECONDS,
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=prompt_dir,
+                text=True,
+                capture_output=True,
+                timeout=_REVIEWER_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise ReviewerExecutionError(f"{role} reviewer timed out") from error
+        except OSError as error:
+            raise ReviewerExecutionError(f"{role} reviewer failed: {error}") from error
         if completed.returncode:
             diagnostic = (
                 completed.stderr.encode("utf-8")[-_MAX_REVIEWER_STDERR_BYTES:]
@@ -498,12 +509,11 @@ def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> d
         artifact = parse_only_json(completed.stdout, role)
         validate_artifact(artifact, role, reviewer, context)
         return artifact
-    except subprocess.TimeoutExpired as error:
-        raise ReviewerExecutionError(f"{role} reviewer timed out") from error
-    except OSError as error:
-        raise ReviewerExecutionError(f"{role} reviewer failed: {error}") from error
     finally:
-        shutil.rmtree(prompt_dir, ignore_errors=True)
+        try:
+            shutil.rmtree(prompt_dir)
+        except OSError as error:
+            raise ReviewError(f"{role} reviewer cleanup failed: {error}") from error
 
 
 def run_secondary_reviewer(context: dict, hermes_bin: str) -> dict:
