@@ -123,6 +123,28 @@ class StewardReviewTests(unittest.TestCase):
             ],
         })
 
+    def test_no_policy_prefers_remote_tracking_base_over_same_named_local_branch(self):
+        base_sha = subprocess.run(
+            ["git", "rev-parse", "main"],
+            cwd=self.repo,
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout.strip()
+        self.run_git("update-ref", "refs/remotes/origin/main", base_sha)
+        self.run_git("update-ref", "refs/remotes/origin/feature", "HEAD")
+        self.run_git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/feature")
+        self.run_git("branch", "-f", "main", "HEAD")
+
+        manifest = self.read_manifest(self.run_runner(env={
+            **os.environ,
+            "STEWARD_STATE_ROOT": str(self.root / "default-state"),
+        }))
+
+        self.assertEqual(manifest["base_ref"], "origin/main")
+        self.assertEqual(manifest["base_sha"], base_sha)
+        self.assertEqual(manifest["lane"], "deep")
+
     def test_no_policy_produces_ready_builtin_manifest_with_required_reviewer_contract(self):
         state_root = self.root / "default-state"
         result = self.run_runner(env={**os.environ, "STEWARD_STATE_ROOT": str(state_root)})

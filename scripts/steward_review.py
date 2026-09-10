@@ -136,18 +136,18 @@ def _origin_repository(repo_dir: Path) -> str:
 
 
 def _default_base_ref(repo_dir: Path) -> str:
-    """Choose the checked-out repository's remote default branch without fetching."""
+    """Choose a remote-tracking default base before any same-named local branch."""
     remote_head = subprocess.run(
         ["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
         cwd=repo_dir,
         text=True,
         capture_output=True,
     )
-    candidates = []
+    candidates = ["origin/main", "origin/master"]
     if remote_head.returncode == 0 and remote_head.stdout.strip().startswith("origin/"):
-        candidates.append(remote_head.stdout.strip().removeprefix("origin/"))
+        candidates.append(remote_head.stdout.strip())
     candidates.extend(("main", "master"))
-    for candidate in candidates:
+    for candidate in dict.fromkeys(candidates):
         if subprocess.run(
             ["git", "rev-parse", "--verify", "--quiet", f"{candidate}^{{commit}}"],
             cwd=repo_dir,
