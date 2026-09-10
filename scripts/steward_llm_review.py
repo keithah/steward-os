@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -140,6 +141,13 @@ def _sanitize_branch(branch: str) -> str:
     segment = re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip(".-")
     if not segment:
         raise ReviewError("branch invalid")
+    return segment
+
+
+def _sanitize_path_component(value: str, label: str) -> str:
+    segment = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip(".-")
+    if not segment:
+        raise ReviewError(f"{label} invalid")
     return segment
 
 
@@ -679,13 +687,41 @@ def run_secondary_reviewer(context: dict, hermes_bin: str) -> dict:
 
 def _artifact_path(context: dict, role: str) -> Path:
     owner, repository = context["repository"].split("/", 1)
+    branch = context["head_sha"] if context["branch"] == "" else context["branch"]
+    sanitized_branch = _sanitize_branch(branch)
+    roles = context.get("roles", _LANE_ROLES[context["lane"]])
+    reviewers = context.get("reviewers")
+    if reviewers is None:
+        reviewers = context["required_reviewers"]
+    run_identity = {
+        "repository": context["repository"],
+        "branch": sanitized_branch,
+        "head_sha": context["head_sha"],
+        "base_sha": context["base_sha"],
+        "merge_base_sha": context["merge_base_sha"],
+        "config_revision": context["config_revision"],
+        "lane": context["lane"],
+        "roles": list(roles),
+        "reviewers": reviewers,
+    }
+    run_digest = hashlib.sha256(
+        json.dumps(run_identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
     return (
         context["report_root"]
-        / f"{owner}__{repository}"
-        / f"branch-{_sanitize_branch(context['branch'])}"
+        / f"{_sanitize_path_component(owner, 'repository owner')}__{_sanitize_path_component(repository, 'repository name')}"
+        / f"branch-{sanitized_branch}"
         / context["head_sha"]
+        / f"run-{run_digest}"
         / f"{role}.json"
     )
+
+
+def preflight_artifact_destination(context: dict) -> None:
+    destination_directory = _artifact_path(context, context["roles"][0]).parent
+    steward_review.secure_directory_chain(destination_directory.parent, "artifact destination")
+    if destination_directory.exists():
+        raise ReviewError("review artifact directory already exists")
 
 
 def persist_artifacts(context: dict, artifacts: dict) -> list[Path]:
@@ -696,7 +732,7 @@ def persist_artifacts(context: dict, artifacts: dict) -> list[Path]:
     try:
         steward_review.secure_directory_chain(destination_parent, "artifact destination")
         if destination_directory.exists():
-            raise ReviewError("exact-SHA artifact directory already exists")
+            raise ReviewError("review artifact directory already exists")
         staging_directory = Path(
             tempfile.mkdtemp(prefix=f".{context['head_sha']}.", dir=destination_parent)
         )
@@ -708,7 +744,7 @@ def persist_artifacts(context: dict, artifacts: dict) -> list[Path]:
                 json.dump(artifacts[role], temporary_file, sort_keys=True)
                 temporary_file.write("\n")
         if destination_directory.exists():
-            raise ReviewError("exact-SHA artifact directory already exists")
+            raise ReviewError("review artifact directory already exists")
         staging_directory.replace(destination_directory)
         staging_directory = None
         return [_artifact_path(context, role) for role in roles]
@@ -737,6 +773,8 @@ def main() -> int:
         revalidate_context(context)
         ensure_private_report_root(context["report_root"])
         context["diff"] = committed_diff(context)
+        revalidate_context(context)
+        preflight_artifact_destination(context)
         revalidate_context(context)
         artifacts = {}
         for role in context["roles"]:

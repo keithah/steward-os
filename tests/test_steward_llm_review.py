@@ -407,14 +407,66 @@ class StewardLlmReviewTests(unittest.TestCase):
         result = self.run_orchestrator()
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        destination = (
-            self.report_root
-            / "acme__widget"
-            / "branch-feature-exact-state"
-            / self.head_sha
-        )
+        destination = self.review_module._artifact_path(
+            {**self.manifest, "report_root": self.report_root}, "primary"
+        ).parent
         self.assertEqual(
             {path.name for path in destination.glob("*.json")},
+            {"primary.json", "adversarial.json"},
+        )
+
+    def test_rejects_preexisting_exact_review_run_before_invoking_reviewer(self):
+        first = self.run_orchestrator()
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        invocations_before_collision = self.hermes_log.read_text().splitlines()
+
+        second = self.run_orchestrator()
+
+        self.assertNotEqual(second.returncode, 0)
+        self.assertIn("artifact directory already exists", second.stderr)
+        self.assertEqual(self.hermes_log.read_text().splitlines(), invocations_before_collision)
+
+    def test_preserves_same_head_artifact_history_for_distinct_config_identity(self):
+        first = self.run_orchestrator()
+        first_destination = self.review_module._artifact_path(
+            {**self.manifest, "report_root": self.report_root}, "primary"
+        ).parent
+        policy_path = self.policy_root / "policy.json"
+        policy = json.loads(policy_path.read_text())
+        policy["review"]["deep_paths"].append("another-deep-path/**")
+        policy_path.write_text(json.dumps(policy))
+        review_runner = Path(__file__).resolve().parents[1] / "scripts" / "steward_review.py"
+        manifest_result = subprocess.run(
+            [sys.executable, str(review_runner), "--repo-dir", str(self.repo)],
+            text=True,
+            capture_output=True,
+            env={**os.environ, "STEWARD_POLICY_ROOT": str(self.policy_root)},
+        )
+        self.assertEqual(manifest_result.returncode, 0, manifest_result.stderr)
+        previous_config_revision = self.config_revision
+        self.manifest_path = Path(manifest_result.stdout.strip())
+        self.manifest = json.loads(self.manifest_path.read_text())
+        self.config_revision = self.manifest["config_revision"]
+        self.fake_hermes.write_text(
+            self.fake_hermes.read_text().replace(previous_config_revision, self.config_revision)
+        )
+
+        second = self.run_orchestrator()
+        second_destination = self.review_module._artifact_path(
+            {**self.manifest, "report_root": self.report_root}, "primary"
+        ).parent
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(self.head_sha, json.loads((first_destination / "primary.json").read_text())["head_sha"])
+        self.assertNotEqual(first_destination, second_destination)
+        self.assertEqual(
+            {path.name for path in first_destination.glob("*.json")},
+            {"primary.json", "adversarial.json"},
+        )
+        self.assertEqual(
+            {path.name for path in second_destination.glob("*.json")},
             {"primary.json", "adversarial.json"},
         )
 
@@ -497,12 +549,9 @@ class StewardLlmReviewTests(unittest.TestCase):
         result = self.run_orchestrator()
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        destination = (
-            self.report_root
-            / "acme__widget"
-            / f"branch-{self.head_sha}"
-            / self.head_sha
-        )
+        destination = self.review_module._artifact_path(
+            {**self.manifest, "report_root": self.report_root}, "primary"
+        ).parent
         self.assertEqual(
             {path.name for path in destination.glob("*.json")},
             {"primary.json", "adversarial.json"},
@@ -945,6 +994,12 @@ class StewardLlmReviewTests(unittest.TestCase):
             "repository": "acme/widget",
             "branch": "feature/exact-state",
             "head_sha": self.head_sha,
+            "base_sha": self.base_sha,
+            "merge_base_sha": self.merge_base_sha,
+            "config_revision": self.config_revision,
+            "lane": "deep",
+            "roles": ("primary", "adversarial"),
+            "reviewers": self.manifest["required_reviewers"],
         }
         artifacts = {role: {"role": role} for role in ("primary", "adversarial")}
         destination = self.review_module._artifact_path(context, "primary").parent
@@ -969,6 +1024,12 @@ class StewardLlmReviewTests(unittest.TestCase):
             "repository": "acme/widget",
             "branch": "feature/exact-state",
             "head_sha": self.head_sha,
+            "base_sha": self.base_sha,
+            "merge_base_sha": self.merge_base_sha,
+            "config_revision": self.config_revision,
+            "lane": "deep",
+            "roles": ("primary", "adversarial"),
+            "reviewers": self.manifest["required_reviewers"],
         }
         artifacts = {role: {"role": role} for role in ("primary", "adversarial")}
         destination = self.review_module._artifact_path(context, "primary").parent
@@ -998,12 +1059,9 @@ class StewardLlmReviewTests(unittest.TestCase):
         result = self.run_orchestrator()
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        destination = (
-            self.report_root
-            / "acme__widget"
-            / "branch-feature-exact-state"
-            / self.head_sha
-        )
+        destination = self.review_module._artifact_path(
+            {**self.manifest, "report_root": self.report_root}, "primary"
+        ).parent
         self.assertEqual(
             {path.name for path in destination.glob("*.json")},
             {"primary.json", "adversarial.json"},
@@ -1120,6 +1178,8 @@ class StewardLlmReviewTests(unittest.TestCase):
 
         self.assertIn("external private working directory", reference_content)
         self.assertIn("--query-file", reference_content)
+        self.assertIn("run-<sha256(canonical-review-run-identity)>", reference_content)
+        self.assertIn("base SHA, merge-base SHA, configuration revision, lane, and required reviewer contract", reference_content)
         self.assertNotIn("Because isolation remediation is pending", reference_content)
 
     def test_reviewer_isolated_from_checkout_and_receives_only_committed_diff(self):
