@@ -1257,7 +1257,9 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertIn("external private working directory", reference_content)
         self.assertIn("--query-file", reference_content)
         self.assertIn("run-<sha256(canonical-review-run-identity)>", reference_content)
-        self.assertIn("base SHA, merge-base SHA, configuration revision, lane, and required reviewer contract", reference_content)
+        self.assertIn("raw branch/detached discriminator", reference_content)
+        self.assertIn("sanitized branch remains a path-display component only", reference_content)
+        self.assertNotIn("sanitized branch or detached-HEAD identity", reference_content)
         self.assertNotIn("Because isolation remediation is pending", reference_content)
 
     def test_reviewer_isolated_from_checkout_and_receives_only_committed_diff(self):
