@@ -234,7 +234,16 @@ class StewardLlmReviewTests(unittest.TestCase):
     def write_manifest(self):
         self.manifest_path.write_text(json.dumps(self.manifest))
 
-    def run_orchestrator(self, behavior="writes-valid", manifest_path=None):
+    def run_orchestrator(self, behavior="writes-valid", manifest_path=None, *, use_policy=True):
+        env = {
+            **os.environ,
+            "HERMES_HOME": str(self.root / f"fake-hermes-{behavior}"),
+        }
+        if use_policy:
+            env["STEWARD_POLICY_ROOT"] = str(self.policy_root)
+        else:
+            env.pop("STEWARD_POLICY_ROOT", None)
+            env["STEWARD_STATE_ROOT"] = str(self.builtin_state_root)
         return subprocess.run(
             [
                 sys.executable,
@@ -248,14 +257,10 @@ class StewardLlmReviewTests(unittest.TestCase):
             ],
             text=True,
             capture_output=True,
-            env={
-                **os.environ,
-                "HERMES_HOME": str(self.root / f"fake-hermes-{behavior}"),
-                "STEWARD_POLICY_ROOT": str(self.policy_root),
-            },
+            env=env,
         )
 
-    def write_ready_runner_manifest(self, lane="deep", initialize=True):
+    def write_ready_runner_manifest(self, lane="deep", initialize=True, *, use_policy=True):
         """Produce a ready manifest through the real local review runner."""
         def run_git(*args):
             subprocess.run(
@@ -308,6 +313,8 @@ class StewardLlmReviewTests(unittest.TestCase):
                 "commands": [],
             },
         }))
+        state_root = self.root / "default-state"
+        self.builtin_state_root = state_root
         review_runner = Path(__file__).resolve().parents[1] / "scripts" / "steward_review.py"
         result = subprocess.run(
             [
@@ -318,7 +325,11 @@ class StewardLlmReviewTests(unittest.TestCase):
             ],
             text=True,
             capture_output=True,
-            env={**os.environ, "STEWARD_POLICY_ROOT": str(self.policy_root)},
+            env=(
+                {**os.environ, "STEWARD_POLICY_ROOT": str(self.policy_root)}
+                if use_policy
+                else {**os.environ, "STEWARD_STATE_ROOT": str(state_root)}
+            ),
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.manifest_path = Path(result.stdout.strip())
@@ -329,6 +340,15 @@ class StewardLlmReviewTests(unittest.TestCase):
             current = ready_manifest[name]
             self.fake_hermes.write_text(self.fake_hermes.read_text().replace(previous, current))
             setattr(self, name, current)
+
+    def test_launcher_completes_fake_reviewer_run_without_policy_environment(self):
+        self.write_ready_runner_manifest(use_policy=False, initialize=False)
+
+        result = self.run_orchestrator(use_policy=False)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.hermes_log.is_file())
+        self.assertEqual(len(result.stdout.splitlines()), 2)
 
     def test_rejects_forged_checkout_manifest_before_reviewer_invocation_or_artifacts(self):
         forged = dict(self.manifest)

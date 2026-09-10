@@ -293,6 +293,14 @@ def builtin_config(repo_dir: Path) -> dict:
             "sensitive_paths": ["**"],
             "visual_paths": [],
             "deep_paths": ["**"],
+            "reviewers": {
+                "primary": {"provider": "openai-codex", "model": "gpt-6-astra"},
+                "adversarial_candidates": [
+                    {"provider": "anthropic", "model": "claude-opus-4-6"},
+                    {"provider": "xai-oauth", "model": "grok-4.6"},
+                    {"provider": "opencode-zen", "model": "muse-spark-1.3-contributor-free"},
+                ],
+            },
             "execute_contributor_code": False,
             "sandbox_available": False,
             "command_timeout_seconds": 300,
@@ -756,11 +764,7 @@ def main() -> int:
             prepare_private_state_root(Path(config["paths"][name]), name)
         lane = select_lane(manifest["changed_paths"], config["review"])
         required_reviewers = required_reviewer_contracts(lane, config["review"])
-        evidence_gaps = (
-            ["no repository-specific review configuration"]
-            if config_source == "builtin-default"
-            else []
-        )
+        evidence_gaps = []
         if required_reviewers is None:
             evidence_gaps.append("missing required reviewer configuration")
         manifest.update(

@@ -10,15 +10,15 @@ The Hermes PR review gate produces local-only, exact-SHA review evidence before 
 
 ## Install the public procedure
 
-Keep this repository public-safe. Store live policy, manifests, reports, credentials, repository inventories, and host-specific paths outside the reviewed checkout and outside this repository. Without a policy, the built-in configuration deliberately produces a blocked diagnostic manifest under `~/.config/steward-os/runtime/`; it cannot establish project-specific quality evidence.
+Keep this repository public-safe. Store manifests, reports, credentials, repository inventories, and host-specific paths outside the reviewed checkout and outside this repository. No policy is required: the built-in configuration writes ready, local-only evidence under `~/.config/steward-os/runtime/`. An owner-private policy is an optional override, never a requirement.
 
 1. Make the runner available from a trusted checkout of this repository.
-2. Create one owner-private directory outside every reviewed checkout. Copy [`setup/hermes-review-policy.example.json`](../../setup/hermes-review-policy.example.json) to `policy.json` there, replacing its path placeholders only in that private copy. The root must be owner-owned and mode `0700` (or stricter).
-3. Set `STEWARD_POLICY_ROOT` to that private directory and run the collector against any clean supported-GitHub checkout. The runner derives `repository.id` from the checkout's `origin`, discovers the local default base ref, uses the policy's lane globs and exact dual-reviewer contract, and runs no reviewed-code commands.
-4. Optionally add `overrides/owner__repository.json` under the same private root using [`setup/hermes-review-config.example.json`](../../setup/hermes-review-config.example.json). An override may contain only `base_ref` and lane path lists; it cannot replace repository identity, state roots, reviewers, execution flags, or commands. Complete per-repository configuration is forbidden.
+2. Run the collector against any clean supported-GitHub checkout. It derives `repository.id` from `origin`, discovers the local default base ref, uses the fixed approved reviewer contract, and runs no reviewed-code commands.
+3. Optionally create one owner-private directory outside every reviewed checkout, copy [`setup/hermes-review-policy.example.json`](../../setup/hermes-review-policy.example.json) to `policy.json` there, and set `STEWARD_POLICY_ROOT` to it. This owner-private override may set private report/manifest roots, base ref, and lane globs, but cannot replace repository identity, reviewers, execution flags, or commands.
+4. Optionally add `overrides/owner__repository.json` under the same private root using [`setup/hermes-review-config.example.json`](../../setup/hermes-review-config.example.json). An override may contain only `base_ref` and lane path lists. Complete per-repository configuration is forbidden.
 5. Load [`skills/hermes-pr-review/SKILL.md`](../../skills/hermes-pr-review/SKILL.md) in Hermes for the review procedure.
 
-Reviewer provider/model identifiers are private operator policy, not credentials: primary is ChatGPT OAuth `openai-codex`/`gpt-6-astra`. For deep and visual lanes, use the fail-closed ordered secondary candidates: Anthropic OAuth `anthropic`/`claude-opus-4-6`, then xAI OAuth `xai-oauth`/`grok-4.6`, then only free Zen `opencode-zen`/`muse-spark-1.3-contributor-free`. Paid models must never be routed through Zen. No credential value belongs in JSON.
+Reviewer provider/model identifiers are fixed contracts, not credentials: primary is ChatGPT OAuth `openai-codex`/`gpt-6-astra`. For deep and visual lanes, use the fail-closed ordered secondary candidates: Anthropic OAuth `anthropic`/`claude-opus-4-6`, then xAI OAuth `xai-oauth`/`grok-4.6`, then only free Zen `opencode-zen`/`muse-spark-1.3-contributor-free`. Paid models must never be routed through Zen. No credential value belongs in JSON.
 
 The private `policy.json` has this complete shape (the public path strings are placeholders, not usable host paths):
 
@@ -53,14 +53,13 @@ The global policy must set `commands` to `[]` and all reviewed-code execution fl
 
 ## Run the evidence collector
 
-From the public runner checkout, invoke the runner with a clean target repository and owner-private policy:
+From the public runner checkout, invoke the runner with a clean target repository; no policy is required:
 
 ```sh
-STEWARD_POLICY_ROOT=/private/steward-os/policy \
-  python3 scripts/steward_review.py --repo-dir /path/to/repository
+python3 scripts/steward_review.py --repo-dir /path/to/repository
 ```
 
-With `STEWARD_POLICY_ROOT` set, no per-repository configuration is required: the runner loads `<policy-root>/policy.json`, derives the identity from origin, and optionally reads only `<policy-root>/overrides/owner__repository.json`. It refuses a nonprivate policy root, policy contents containing a repository ID, an invalid override, state roots inside the checkout, or any command/reviewed-code execution policy. `--config` and `--config-dir` are rejected before any manifest output or write. Without a policy it retains the blocked built-in diagnostic baseline. It writes a manifest only after valid Git/policy state is resolved.
+With `STEWARD_POLICY_ROOT` set, no per-repository configuration is required: the runner loads `<policy-root>/policy.json`, derives the identity from origin, and optionally reads only `<policy-root>/overrides/owner__repository.json`. It refuses a nonprivate or invalid supplied policy rather than silently falling back, including policy contents containing a repository ID, state roots inside the checkout, or any command/reviewed-code execution policy. `--config` and `--config-dir` are rejected before any manifest output or write. Without a policy, it uses the ready built-in baseline and its private runtime root. It writes a manifest only after valid Git/configuration state is resolved.
 
 The manifest is local-only JSON at:
 
@@ -92,7 +91,7 @@ No verified blocker found in this Steward pass.
 
 ## `steward` and `run steward`
 
-`steward` is the terminal entrypoint. It runs the local runner first, using the owner-private global policy when `STEWARD_POLICY_ROOT` is configured and the blocked built-in baseline otherwise; only a ready manifest may be passed to Hermes for the public `hermes-pr-review` procedure. The launcher also requires `STEWARD_POLICY_ROOT` and accepts only the deterministic manifest location derived from that active policy, checkout origin, branch, and exact HEAD. It must not use GitHub write operations.
+`steward` is the terminal entrypoint. It runs the local runner first, using the ready built-in baseline unless `STEWARD_POLICY_ROOT` configures an owner-private override; only a ready manifest may be passed to Hermes for the public `hermes-pr-review` procedure. The launcher uses the same current built-in or optional-policy configuration and accepts only its deterministic manifest location for the checkout origin, branch, and exact HEAD. It must not use GitHub write operations.
 
 `run steward` is the chat invocation of the same gate on the current committed branch. Hermes runs the local runner, reads the resulting manifest, and follows the public procedure. It is read-only with respect to GitHub objects and writes only its local report outside the public checkout.
 

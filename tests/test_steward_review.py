@@ -123,14 +123,23 @@ class StewardReviewTests(unittest.TestCase):
             ],
         })
 
-    def test_no_policy_remains_blocked_diagnostic_baseline(self):
+    def test_no_policy_produces_ready_builtin_manifest_with_required_reviewer_contract(self):
         state_root = self.root / "default-state"
         result = self.run_runner(env={**os.environ, "STEWARD_STATE_ROOT": str(state_root)})
-        self.assertEqual(result.returncode, 1, result.stderr)
-        manifest = json.loads(Path(result.stdout.strip()).read_text())
+        manifest = self.read_manifest(result)
+
         self.assertEqual(manifest["config_source"], "builtin-default")
-        self.assertEqual(manifest["status"], "blocked")
-        self.assertIn("no repository-specific review configuration", manifest["evidence_gaps"])
+        self.assertEqual(manifest["status"], "ready")
+        self.assertEqual(manifest["required_reviewers"], {
+            "primary": {"provider": "openai-codex", "model": "gpt-6-astra"},
+            "adversarial_candidates": [
+                {"provider": "anthropic", "model": "claude-opus-4-6"},
+                {"provider": "xai-oauth", "model": "grok-4.6"},
+                {"provider": "opencode-zen", "model": "muse-spark-1.3-contributor-free"},
+            ],
+        })
+        self.assertEqual(manifest["commands"], [])
+        self.assertFalse(manifest["evidence_gaps"])
 
     def test_default_builtin_state_root_rejects_lexical_symlinks_before_manifest_write(self):
         for link_component in ("runtime", "steward-os"):
@@ -234,9 +243,9 @@ class StewardReviewTests(unittest.TestCase):
         ordinary_root = self.root / "ordinary-state"
         result = self.run_runner(env={**os.environ, "STEWARD_STATE_ROOT": str(ordinary_root)})
 
-        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
         manifest = json.loads(Path(result.stdout.strip()).read_text())
-        self.assertEqual(manifest["status"], "blocked")
+        self.assertEqual(manifest["status"], "ready")
         for path in (ordinary_root, ordinary_root / "reports", ordinary_root / "manifests"):
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
 

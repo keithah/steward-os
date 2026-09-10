@@ -9,9 +9,9 @@ Use this procedure only for a clean, committed branch. It creates local review e
 
 ## Safety boundary
 
-- A ready review requires `STEWARD_POLICY_ROOT`: an absolute, owner-owned, mode-`0700` (or stricter) directory outside the reviewed checkout. It contains the private `policy.json`; without it, the runner's built-in result is diagnostic and `blocked`.
-- The runner derives repository identity from the reviewed checkout's supported GitHub `origin`. The private policy must not set a repository ID. Per-repository files are optional narrow overrides at `overrides/<owner>__<repository>.json` and may set only `base_ref` and lane path globs (`sensitive_paths`, `visual_paths`, `deep_paths`). They may not set paths, reviewers, execution flags, commands, or repository identity.
-- The ready-policy reviewer identities are fixed: primary ChatGPT OAuth `openai-codex` / `gpt-6-astra`; for `deep` and `visual`, the fail-closed ordered secondary candidates are Anthropic OAuth `anthropic` / `claude-opus-4-6`, then xAI OAuth `xai-oauth` / `grok-4.6`, then only free Zen `opencode-zen` / `muse-spark-1.3-contributor-free`. Zen must never route paid models. The manifest binds the primary plus this exact candidate order; the adversarial artifact binds to the candidate actually selected. Fast remains primary-only. The policy has distinct owner-private report and manifest roots and no commands or reviewed-code execution.
+- No `STEWARD_POLICY_ROOT` is required. The ready built-in baseline derives repository identity and base ref from the reviewed checkout, binds the fixed reviewer contract, uses no commands or reviewed-code execution, and writes state beneath its private runtime root.
+- `STEWARD_POLICY_ROOT`, when explicitly supplied, is an optional absolute, owner-owned, mode-`0700` (or stricter) owner-private override outside the reviewed checkout. Its `policy.json` may set private report/manifest roots, base ref, and lane globs; it must not set repository identity, arbitrary reviewers, execution flags, or commands. Per-repository files at `overrides/<owner>__<repository>.json` remain narrower: only `base_ref` and lane path globs (`sensitive_paths`, `visual_paths`, `deep_paths`). An invalid supplied policy is a hard failure, not a fallback.
+- The reviewer identities are fixed in both modes: primary ChatGPT OAuth `openai-codex` / `gpt-6-astra`; for `deep` and `visual`, the fail-closed ordered secondary candidates are Anthropic OAuth `anthropic` / `claude-opus-4-6`, then xAI OAuth `xai-oauth` / `grok-4.6`, then only free Zen `opencode-zen` / `muse-spark-1.3-contributor-free`. Zen must never route paid models. The manifest binds the primary plus this exact candidate order; the adversarial artifact binds to the candidate actually selected. Fast remains primary-only.
 - **Never use, accept, suggest, or pass `--config` or `--config-dir`.** A complete per-repository configuration is forbidden and the runner rejects those flags before manifest output or write.
 - For this procedure, do not create or alter any GitHub object: no PRs, comments, reviews, approvals, labels, merges, pushes, releases, deployments, or settings changes.
 - This public skill is read-only: do not execute, import, build, test, or otherwise run reviewed-checkout code. Do not write to the reviewed checkout.
@@ -47,21 +47,19 @@ Use stable, normalized `probe_id` values for findings. Each applicable probe rec
 ## Procedure
 
 1. Confirm the target repository is clean and identify its committed `HEAD`. Do not stash, reset, commit, or otherwise mutate it to make it reviewable.
-2. Confirm `STEWARD_POLICY_ROOT` names the owner-private policy root, then invoke the runner without configuration flags:
+2. Invoke the runner without configuration flags. Set `STEWARD_POLICY_ROOT` only when intentionally using an owner-private override:
 
    ```sh
-   STEWARD_POLICY_ROOT=/private/steward-os/policy \
-     python3 scripts/steward_review.py --repo-dir /path/to/repository
+   python3 scripts/steward_review.py --repo-dir /path/to/repository
    ```
 
-   Do not replace this global-policy flow with a full repository configuration.
+   Do not replace this built-in-or-optional-policy flow with a full repository configuration.
 3. Read the manifest path emitted by the runner. Verify its `repository`, `branch`, `base_sha`, `merge_base_sha`, `head_sha`, `lane`, and `config_revision` (the configuration revision) all bind to the branch being reviewed.
 4. If the manifest status is `blocked`, stop. Record the blocked command or validation evidence locally; do not continue to a clean conclusion.
 5. Invoke the exact-SHA launcher with the emitted manifest; it must succeed before any clean conclusion:
 
    ```sh
-   STEWARD_POLICY_ROOT=/private/steward-os/policy \
-     python3 scripts/steward_llm_review.py --repo-dir /path/to/repository \
+   python3 scripts/steward_llm_review.py --repo-dir /path/to/repository \
      --manifest <emitted manifest>
    ```
 

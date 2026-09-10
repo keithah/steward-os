@@ -175,12 +175,8 @@ def _origin_repository(repo_dir: Path) -> str:
 
 
 def _policy_context(repo_dir: Path) -> dict:
-    """Derive launcher bindings solely from the active owner-private policy."""
-    if os.environ.get("STEWARD_POLICY_ROOT") is None:
-        raise ReviewError("STEWARD_POLICY_ROOT is required")
-    config = steward_review.load_global_policy(repo_dir)
-    if config is None:
-        raise ReviewError("STEWARD_POLICY_ROOT is required")
+    """Derive launcher bindings from an optional policy override or the safe default."""
+    config = steward_review.load_global_policy(repo_dir) or steward_review.builtin_config(repo_dir)
     try:
         repository = _origin_repository(repo_dir)
         head_sha = _git(repo_dir, "rev-parse", "HEAD")
