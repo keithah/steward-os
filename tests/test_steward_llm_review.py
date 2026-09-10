@@ -642,7 +642,8 @@ class StewardLlmReviewTests(unittest.TestCase):
         context = {
             "repository": "acme/widget", "branch": "feature/exact-state", "head_sha": self.head_sha,
             "base_sha": self.base_sha, "merge_base_sha": self.merge_base_sha,
-            "config_revision": self.config_revision, "diff": "",
+            "config_revision": self.config_revision, "repo_dir": self.repo,
+            "report_root": self.report_root, "diff": "",
         }
         reviewer = self.manifest["required_reviewers"]["primary"]
         child_pid_path = self.root / "reviewer-child.pid"
@@ -671,7 +672,8 @@ class StewardLlmReviewTests(unittest.TestCase):
         context = {
             "repository": "acme/widget", "branch": "feature/exact-state", "head_sha": self.head_sha,
             "base_sha": self.base_sha, "merge_base_sha": self.merge_base_sha,
-            "config_revision": self.config_revision, "diff": "",
+            "config_revision": self.config_revision, "repo_dir": self.repo,
+            "report_root": self.report_root, "diff": "",
         }
         reviewer = self.manifest["required_reviewers"]["primary"]
         child_pid_path = self.root / "reviewer-child.pid"
@@ -702,7 +704,8 @@ class StewardLlmReviewTests(unittest.TestCase):
         context = {
             "repository": "acme/widget", "branch": "feature/exact-state", "head_sha": self.head_sha,
             "base_sha": self.base_sha, "merge_base_sha": self.merge_base_sha,
-            "config_revision": self.config_revision, "diff": "",
+            "config_revision": self.config_revision, "repo_dir": self.repo,
+            "report_root": self.report_root, "diff": "",
         }
         reviewer = self.manifest["required_reviewers"]["primary"]
         child_pid_path = self.root / "reviewer-child.pid"
@@ -850,7 +853,8 @@ class StewardLlmReviewTests(unittest.TestCase):
         context = {
             "repository": "acme/widget", "branch": "feature/exact-state", "head_sha": self.head_sha,
             "base_sha": self.base_sha, "merge_base_sha": self.merge_base_sha,
-            "config_revision": self.config_revision, "diff": "",
+            "config_revision": self.config_revision, "repo_dir": self.repo,
+            "report_root": self.report_root, "diff": "",
         }
         reviewer = self.manifest["required_reviewers"]["adversarial_candidates"][0]
         with (
@@ -867,7 +871,8 @@ class StewardLlmReviewTests(unittest.TestCase):
         context = {
             "repository": "acme/widget", "branch": "feature/exact-state", "head_sha": self.head_sha,
             "base_sha": self.base_sha, "merge_base_sha": self.merge_base_sha,
-            "config_revision": self.config_revision, "diff": "",
+            "config_revision": self.config_revision, "repo_dir": self.repo,
+            "report_root": self.report_root, "diff": "",
         }
         reviewer = self.manifest["required_reviewers"]["primary"]
         artifact = {
@@ -898,6 +903,20 @@ class StewardLlmReviewTests(unittest.TestCase):
             self.assertEqual(invocation["runtime_env"], {
                 "path": True, "home": True, "tmpdir": True, "unrelated_secret": False,
             })
+
+    def test_reviewer_prompt_state_stays_outside_checkout_when_tmpdir_is_inside_it(self):
+        attacker_tmpdir = self.repo / "attacker-tmpdir"
+        attacker_tmpdir.mkdir()
+        with mock.patch.dict(os.environ, {"TMPDIR": str(attacker_tmpdir)}):
+            result = self.run_orchestrator()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        invocations = [json.loads(line) for line in self.hermes_log.read_text().splitlines()]
+        self.assertTrue(invocations)
+        for invocation in invocations:
+            query_path = Path(invocation["args"][invocation["args"].index("--query-file") + 1])
+            self.assertFalse(Path(invocation["cwd"]).is_relative_to(self.repo))
+            self.assertFalse(query_path.parent.is_relative_to(self.repo))
 
     def test_rejects_missing_report_root(self):
         self.manifest.pop("report_root")

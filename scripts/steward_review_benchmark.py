@@ -140,9 +140,12 @@ def validate_cases(cases: Any) -> list[dict[str, Any]]:
         source = case["source"]
         if (not isinstance(source, dict) or source.keys() != _SOURCE_FIELDS
                 or not isinstance(source.get("repository"), str)
-                or not source["repository"] or not isinstance(source.get("pr"), int)
+                or not source["repository"] or type(source.get("pr")) is not int
                 or source["pr"] <= 0):
             raise ValueError("each case requires a source repository and PR number")
+        for field in ("language", "hypothesis", "severity", "disposition"):
+            if not isinstance(case[field], str) or not case[field].strip():
+                raise ValueError(f"each case requires nonblank string {field}")
         if not isinstance(case["revision"], str) or not _REVISION_PATTERN.fullmatch(case["revision"]):
             raise ValueError("each case requires an exact 40-character reviewed revision")
         if case["defect_class"] not in VALID_DEFECT_CLASSES:
@@ -267,6 +270,7 @@ def _prepare_private_output_directory(output: Path) -> None:
     while not directory.exists():
         missing_directories.append(directory)
         directory = directory.parent
+    _require_owner_private_directory(directory)
     for directory in reversed(missing_directories):
         try:
             directory.mkdir(mode=0o700)

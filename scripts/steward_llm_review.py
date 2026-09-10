@@ -603,9 +603,25 @@ def _run_reviewer_process(command: list[str], prompt_dir: Path, role: str) -> tu
     return stdout_result["output"], stderr_result["output"]
 
 
-def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> dict:
+def _reviewer_prompt_root(context: dict) -> Path:
+    """Create a private external root for reviewer-controlled prompt state."""
+    report_root = context["report_root"]
+    if not isinstance(report_root, Path):
+        raise ReviewError("reviewer prompt root invalid")
+    prompt_root = report_root / ".reviewer-prompts"
     try:
-        prompt_dir = Path(tempfile.mkdtemp(prefix="steward-llm-review-"))
+        steward_review.secure_directory_chain(prompt_root, "reviewer prompt root")
+    except steward_review.ReviewError as error:
+        raise ReviewError(f"reviewer prompt root invalid: {error}") from error
+    if _inside(prompt_root.resolve(), context["repo_dir"]):
+        raise ReviewError("reviewer prompt root must be outside reviewed checkout")
+    return prompt_root
+
+
+def run_reviewer(role: str, reviewer: dict, context: dict, hermes_bin: str) -> dict:
+    prompt_dir: Path | None = None
+    try:
+        prompt_dir = Path(tempfile.mkdtemp(prefix="steward-llm-review-", dir=_reviewer_prompt_root(context)))
         os.chmod(prompt_dir, 0o700)
     except OSError as error:
         raise ReviewError(f"{role} reviewer prompt setup failed: {error}") from error

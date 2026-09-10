@@ -125,6 +125,32 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate_cases(cases)
 
+    def test_validation_rejects_nonstring_or_blank_metadata_and_boolean_pr_numbers(self) -> None:
+        case = {
+            "id": "pagination-changing-total",
+            "source": {"repository": "keithah/example", "pr": 12},
+            "revision": "0123456789abcdef0123456789abcdef01234567",
+            "language": "python",
+            "defect_class": "snapshot-pagination",
+            "hypothesis": "Changed totals must not shift an established page boundary.",
+            "expected_probes": ["pagination.snapshot"],
+            "severity": "high",
+            "disposition": "remediated",
+        }
+        for field in ("language", "hypothesis", "severity", "disposition"):
+            for value in (None, "", " \t", {}, []):
+                malformed = copy.deepcopy(case)
+                malformed[field] = value
+                with self.subTest(field=field, value=repr(value)):
+                    with self.assertRaises(ValueError):
+                        validate_cases([malformed])
+        for pr in (True, False):
+            malformed = copy.deepcopy(case)
+            malformed["source"]["pr"] = pr
+            with self.subTest(pr=pr):
+                with self.assertRaises(ValueError):
+                    validate_cases([malformed])
+
     def test_scorer_translates_bounded_role_probe_to_canonical_corpus_probes(self) -> None:
         cases = [{
             "id": "credential-output-redirect",
@@ -338,6 +364,26 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
                     "--output", str(output_directory / "score.json"),
                 ])
             self.assertEqual(stat.S_IMODE(output_directory.stat().st_mode), 0o755)
+
+    def test_private_output_rejects_nonprivate_existing_creation_anchor_without_writes(self) -> None:
+        from steward_review_benchmark import _prepare_private_output_directory
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve() / "private-root"
+            root.mkdir(mode=0o700)
+            os.chmod(root, 0o700)
+            shared = root / "shared"
+            shared.mkdir(mode=0o777)
+            os.chmod(shared, 0o777)
+            missing = shared / "new"
+            output = missing / "score.json"
+
+            with self.assertRaisesRegex(ValueError, "owner-private"):
+                _prepare_private_output_directory(output)
+
+            self.assertFalse(missing.exists())
+            self.assertEqual(stat.S_IMODE(root.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(shared.stat().st_mode), 0o777)
 
     def test_cli_rejects_symlink_output_target_without_replacing_it(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
