@@ -687,15 +687,15 @@ def run_secondary_reviewer(context: dict, hermes_bin: str) -> dict:
 
 def _artifact_path(context: dict, role: str) -> Path:
     owner, repository = context["repository"].split("/", 1)
-    branch = context["head_sha"] if context["branch"] == "" else context["branch"]
-    sanitized_branch = _sanitize_branch(branch)
+    branch_discriminator = context["head_sha"] if context["branch"] == "" else context["branch"]
+    sanitized_branch = _sanitize_branch(branch_discriminator)
     roles = context.get("roles", _LANE_ROLES[context["lane"]])
     reviewers = context.get("reviewers")
     if reviewers is None:
         reviewers = context["required_reviewers"]
     run_identity = {
         "repository": context["repository"],
-        "branch": sanitized_branch,
+        "branch": branch_discriminator,
         "head_sha": context["head_sha"],
         "base_sha": context["base_sha"],
         "merge_base_sha": context["merge_base_sha"],
@@ -717,11 +717,33 @@ def _artifact_path(context: dict, role: str) -> Path:
     )
 
 
-def preflight_artifact_destination(context: dict) -> None:
+def _artifact_reservation_path(context: dict) -> Path:
+    roles = context.get("roles", _LANE_ROLES[context["lane"]])
+    destination_directory = _artifact_path(context, roles[0]).parent
+    return destination_directory.with_name(f"{destination_directory.name}.reservation")
+
+
+def preflight_artifact_destination(context: dict) -> Path:
     destination_directory = _artifact_path(context, context["roles"][0]).parent
+    reservation_directory = _artifact_reservation_path(context)
     steward_review.secure_directory_chain(destination_directory.parent, "artifact destination")
     if destination_directory.exists():
         raise ReviewError("review artifact directory already exists")
+    try:
+        reservation_directory.mkdir(mode=0o700)
+    except FileExistsError as error:
+        raise ReviewError(
+            "review artifact reservation already exists "
+            "(possibly stale after an interrupted run; inspect before manual removal)"
+        ) from error
+    return reservation_directory
+
+
+def _release_artifact_reservation(reservation_directory: Path) -> None:
+    try:
+        reservation_directory.rmdir()
+    except OSError as error:
+        raise ReviewError(f"cannot remove owned review artifact reservation: {error}") from error
 
 
 def persist_artifacts(context: dict, artifacts: dict) -> list[Path]:
@@ -761,6 +783,8 @@ def main() -> int:
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--hermes-bin", default="hermes")
     args = parser.parse_args()
+    reservation_directory = None
+    result = 1
     try:
         repo_dir = args.repo_dir.resolve()
         if not repo_dir.is_dir():
@@ -774,7 +798,7 @@ def main() -> int:
         ensure_private_report_root(context["report_root"])
         context["diff"] = committed_diff(context)
         revalidate_context(context)
-        preflight_artifact_destination(context)
+        reservation_directory = preflight_artifact_destination(context)
         revalidate_context(context)
         artifacts = {}
         for role in context["roles"]:
@@ -789,10 +813,17 @@ def main() -> int:
         revalidate_context(context)
         for path in persist_artifacts(context, artifacts):
             print(path)
+        result = 0
     except ReviewError as error:
         print(error, file=sys.stderr)
-        return 1
-    return 0
+    finally:
+        if reservation_directory is not None:
+            try:
+                _release_artifact_reservation(reservation_directory)
+            except ReviewError as error:
+                print(error, file=sys.stderr)
+                result = 1
+    return result
 
 
 if __name__ == "__main__":

@@ -99,6 +99,8 @@ class StewardLlmReviewTests(unittest.TestCase):
                 ],
             }
             behavior = hermes_home.name.removeprefix("fake-hermes-")
+            if behavior == "pause-primary-before-artifact" and role == "primary":
+                time.sleep(1)
             if behavior == "advance-head-after-diff" and role == "primary":
                 repo = hermes_home.parent / "widget"
                 (repo / "post-diff-change.txt").write_text("changed after diff\\n")
@@ -414,6 +416,82 @@ class StewardLlmReviewTests(unittest.TestCase):
             {path.name for path in destination.glob("*.json")},
             {"primary.json", "adversarial.json"},
         )
+        self.assertFalse(
+            self.review_module._artifact_reservation_path(
+                {**self.manifest, "report_root": self.report_root}
+            ).exists()
+        )
+
+    def test_raw_branch_discriminator_prevents_sanitized_branch_identity_collision(self):
+        context = {**self.manifest, "report_root": self.report_root}
+        slash_branch_destination = self.review_module._artifact_path(
+            {**context, "branch": "feature/a"}, "primary"
+        ).parent
+        dash_branch_destination = self.review_module._artifact_path(
+            {**context, "branch": "feature-a"}, "primary"
+        ).parent
+
+        self.assertEqual(slash_branch_destination.parent, dash_branch_destination.parent)
+        self.assertNotEqual(slash_branch_destination, dash_branch_destination)
+
+    def test_rejects_preexisting_reservation_before_invoking_reviewer(self):
+        context = {**self.manifest, "report_root": self.report_root}
+        destination = self.review_module._artifact_path(context, "primary").parent
+        self.review_module.steward_review.secure_directory_chain(
+            destination.parent, "test artifact destination"
+        )
+        reservation = destination.with_name(f"{destination.name}.reservation")
+        reservation.mkdir(mode=0o700)
+
+        result = self.run_orchestrator()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("review artifact reservation already exists", result.stderr)
+        self.assertIn("possibly stale after an interrupted run", result.stderr)
+        self.assertFalse(self.hermes_log.exists())
+        self.assertTrue(reservation.is_dir())
+
+    def test_concurrent_run_is_blocked_by_reservation_before_reviewer_invocation(self):
+        command = [
+            sys.executable,
+            str(self.runner),
+            "--repo-dir",
+            str(self.repo),
+            "--manifest",
+            str(self.manifest_path),
+            "--hermes-bin",
+            str(self.fake_hermes),
+        ]
+        environment = {
+            **os.environ,
+            "HERMES_HOME": str(self.root / "fake-hermes-pause-primary-before-artifact"),
+            "STEWARD_POLICY_ROOT": str(self.policy_root),
+        }
+        first = subprocess.Popen(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment)
+        deadline = time.monotonic() + 5
+        while not self.hermes_log.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertTrue(self.hermes_log.exists(), "first reviewer never started")
+        second = subprocess.run(command, text=True, capture_output=True, env=environment)
+        first_stdout, first_stderr = first.communicate(timeout=10)
+
+        self.assertEqual(first.returncode, 0, first_stderr)
+        self.assertTrue(first_stdout.strip())
+        self.assertNotEqual(second.returncode, 0)
+        self.assertIn("review artifact reservation already exists", second.stderr)
+        self.assertEqual(len(self.hermes_log.read_text().splitlines()), 2)
+
+    def test_removes_owned_reservation_after_reviewer_failure(self):
+        context = {**self.manifest, "report_root": self.report_root}
+        reservation = self.review_module._artifact_reservation_path(context)
+
+        result = self.run_orchestrator("reviewer-fails")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("primary reviewer failed", result.stderr)
+        self.assertTrue(self.hermes_log.exists())
+        self.assertFalse(reservation.exists())
+        self.assertFalse(list(self.report_root.rglob("*.json")))
 
     def test_rejects_preexisting_exact_review_run_before_invoking_reviewer(self):
         first = self.run_orchestrator()
