@@ -443,7 +443,15 @@ def _global_policy_config(policy_root: Path, repo_dir: Path) -> dict:
     }
     override_path = policy_root / "overrides" / f"{repository_id.replace('/', '__')}.json"
     validate_lexical_path(override_path, "policy override")
-    if override_path.is_file():
+    try:
+        override_stat = override_path.lstat()
+    except FileNotFoundError:
+        override_stat = None
+    except OSError as error:
+        raise ReviewError(f"cannot inspect policy override: {error}") from error
+    if override_stat is not None:
+        if not stat.S_ISREG(override_stat.st_mode):
+            raise ReviewError("policy override must be a regular file")
         override = _read_policy_json(override_path, "policy override")
         _require_keys(override, {"base_ref", "review"}, set(override), "policy override")
         if "base_ref" in override:

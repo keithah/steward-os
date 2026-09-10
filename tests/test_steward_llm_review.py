@@ -164,6 +164,14 @@ class StewardLlmReviewTests(unittest.TestCase):
                 ])
                 (hermes_home.parent / "reviewer-child.pid").write_text(str(child.pid))
                 time.sleep(30)
+            if behavior == "escapes-process-group-holds-pipes" and role == "primary":
+                child = subprocess.Popen([
+                    sys.executable,
+                    "-c",
+                    "import os, time; os.setsid(); time.sleep(8)",
+                ])
+                (hermes_home.parent / "reviewer-child.pid").write_text(str(child.pid))
+                time.sleep(30)
             if behavior == "writes-disallowed-candidate" and role == "adversarial":
                 artifact["provider"] = "untrusted"
                 artifact["model"] = "substituted"
@@ -683,6 +691,35 @@ class StewardLlmReviewTests(unittest.TestCase):
             child_pid = int(child_pid_path.read_text())
             with self.assertRaises(ProcessLookupError):
                 os.kill(child_pid, 0)
+        finally:
+            if child_pid_path.exists():
+                try:
+                    os.kill(int(child_pid_path.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    def test_reviewer_timeout_returns_before_escaped_descendant_closes_pipes(self):
+        context = {
+            "repository": "acme/widget", "branch": "feature/exact-state", "head_sha": self.head_sha,
+            "base_sha": self.base_sha, "merge_base_sha": self.merge_base_sha,
+            "config_revision": self.config_revision, "diff": "",
+        }
+        reviewer = self.manifest["required_reviewers"]["primary"]
+        child_pid_path = self.root / "reviewer-child.pid"
+        started = time.monotonic()
+        try:
+            with (
+                mock.patch.object(self.review_module, "_REVIEWER_TIMEOUT_SECONDS", 1),
+                mock.patch.dict(
+                    os.environ,
+                    {"HERMES_HOME": str(self.root / "fake-hermes-escapes-process-group-holds-pipes")},
+                ),
+                self.assertRaisesRegex(self.review_module.ReviewerExecutionError, "reviewer timed out"),
+            ):
+                self.review_module.run_reviewer("primary", reviewer, context, str(self.fake_hermes))
+            self.assertLess(time.monotonic() - started, 4)
+            self.assertTrue(child_pid_path.exists())
+            os.kill(int(child_pid_path.read_text()), 0)
         finally:
             if child_pid_path.exists():
                 try:

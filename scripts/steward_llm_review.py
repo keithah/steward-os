@@ -9,7 +9,6 @@ import stat
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 from pathlib import Path
 
@@ -511,25 +510,64 @@ def _close_reviewer_streams(process: subprocess.Popen) -> None:
                 pass
 
 
-def _join_reviewer_drains(stdout_thread: threading.Thread, stderr_thread: threading.Thread) -> bool:
-    """Wait briefly for pipe drains and report whether both completed."""
-    deadline = time.monotonic() + _REVIEWER_DRAIN_TIMEOUT_SECONDS
-    for thread in (stdout_thread, stderr_thread):
-        thread.join(timeout=max(0, deadline - time.monotonic()))
-    return not stdout_thread.is_alive() and not stderr_thread.is_alive()
+def _drain_reviewer_pipes(process: subprocess.Popen) -> tuple[dict, dict, bool, bool]:
+    """Drain both pipes with deadline-controlled nonblocking reads."""
+    import selectors
 
-
-def _drain_reviewer_stream(stream, limit: int, result: dict) -> None:
-    """Drain a reviewer pipe while retaining no more than limit bytes."""
-    captured = bytearray()
-    overflow = False
-    while chunk := stream.read(8_192):
-        remaining = limit - len(captured)
-        if remaining > 0:
-            captured.extend(chunk[:remaining])
-        overflow = overflow or len(chunk) > remaining
-    result["output"] = bytes(captured).decode("utf-8", errors="replace")
-    result["overflow"] = overflow
+    results = {
+        "stdout": {"captured": bytearray(), "overflow": False},
+        "stderr": {"captured": bytearray(), "overflow": False},
+    }
+    limits = {"stdout": _MAX_REVIEWER_STDOUT_BYTES, "stderr": _MAX_REVIEWER_STDERR_BYTES}
+    selector = selectors.DefaultSelector()
+    for name, stream in (("stdout", process.stdout), ("stderr", process.stderr)):
+        if stream is not None:
+            descriptor = stream.fileno()
+            os.set_blocking(descriptor, False)
+            selector.register(descriptor, selectors.EVENT_READ, name)
+    timeout_deadline = time.monotonic() + _REVIEWER_TIMEOUT_SECONDS
+    drain_deadline = None
+    timed_out = False
+    drain_timed_out = False
+    try:
+        while True:
+            now = time.monotonic()
+            if process.poll() is None:
+                if now >= timeout_deadline:
+                    timed_out = True
+                    break
+                wait_deadline = timeout_deadline
+            else:
+                if not selector.get_map():
+                    break
+                if drain_deadline is None:
+                    drain_deadline = now + _REVIEWER_DRAIN_TIMEOUT_SECONDS
+                if now >= drain_deadline:
+                    drain_timed_out = True
+                    break
+                wait_deadline = drain_deadline
+            if not selector.get_map():
+                time.sleep(min(0.1, max(0, wait_deadline - now)))
+                continue
+            for key, _events in selector.select(timeout=min(0.1, max(0, wait_deadline - now))):
+                name = key.data
+                try:
+                    chunk = os.read(key.fd, 8_192)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fd)
+                    continue
+                result = results[name]
+                remaining = limits[name] - len(result["captured"])
+                if remaining > 0:
+                    result["captured"].extend(chunk[:remaining])
+                result["overflow"] = result["overflow"] or len(chunk) > remaining
+    finally:
+        selector.close()
+    for result in results.values():
+        result["output"] = bytes(result.pop("captured")).decode("utf-8", errors="replace")
+    return results["stdout"], results["stderr"], timed_out, drain_timed_out
 
 
 def _run_reviewer_process(command: list[str], prompt_dir: Path, role: str) -> tuple[str, str]:
@@ -545,34 +583,14 @@ def _run_reviewer_process(command: list[str], prompt_dir: Path, role: str) -> tu
         )
     except OSError as error:
         raise ReviewerExecutionError(f"{role} reviewer failed: {error}") from error
-    stdout_result = {}
-    stderr_result = {}
-    stdout_thread = threading.Thread(
-        target=_drain_reviewer_stream,
-        args=(process.stdout, _MAX_REVIEWER_STDOUT_BYTES, stdout_result),
-        daemon=True,
-    )
-    stderr_thread = threading.Thread(
-        target=_drain_reviewer_stream,
-        args=(process.stderr, _MAX_REVIEWER_STDERR_BYTES, stderr_result),
-        daemon=True,
-    )
-    stdout_thread.start()
-    stderr_thread.start()
-    timed_out = False
-    try:
-        process.wait(timeout=_REVIEWER_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        _stop_reviewer_process_group(process)
+    stdout_result, stderr_result, timed_out, drain_timed_out = _drain_reviewer_pipes(process)
     if timed_out:
-        _close_reviewer_streams(process)
-        _join_reviewer_drains(stdout_thread, stderr_thread)
-        raise ReviewerExecutionError(f"{role} reviewer timed out")
-    if not _join_reviewer_drains(stdout_thread, stderr_thread):
         _stop_reviewer_process_group(process)
         _close_reviewer_streams(process)
-        _join_reviewer_drains(stdout_thread, stderr_thread)
+        raise ReviewerExecutionError(f"{role} reviewer timed out")
+    if drain_timed_out:
+        _stop_reviewer_process_group(process)
+        _close_reviewer_streams(process)
         raise ReviewerExecutionError(f"{role} reviewer pipe drain timed out")
     _close_reviewer_streams(process)
     if stdout_result["overflow"]:

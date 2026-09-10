@@ -57,11 +57,20 @@ Use stable, normalized `probe_id` values for findings. Each applicable probe rec
    Do not replace this global-policy flow with a full repository configuration.
 3. Read the manifest path emitted by the runner. Verify its `repository`, `branch`, `base_sha`, `merge_base_sha`, `head_sha`, `lane`, and `config_revision` (the configuration revision) all bind to the branch being reviewed.
 4. If the manifest status is `blocked`, stop. Record the blocked command or validation evidence locally; do not continue to a clean conclusion.
-5. Inspect the deterministic evidence in every manifest command result and skipped check. Inspect the diff and changed paths, repository instructions, and relevant implementation and test paths. If a current PR exists, inspect its current checks and comments as read-only evidence.
-6. Perform the **primary review** for the selected lane. Validate the changed behavior, tests, security and compatibility implications, and the evidence against the exact manifest state.
-7. When the selected lane is `deep` or `visual`, perform a distinct, independent **adversarial review** after the primary pass. Re-examine the highest-risk paths and actively seek failures the primary pass may have missed. For visual work, inspect the rendered or visual evidence when the configured deterministic evidence provides it.
-8. Write one local-only Markdown report outside the public checkout. Include the exact repository, branch, base SHA, merge-base SHA, head SHA, `config_revision` (configuration revision), lane, manifest path, command and skipped-check evidence, inspected diff/paths/instructions, PR checks/comments when applicable, primary-review findings, adversarial-review findings when required, and rejected or stale findings.
-9. A clean report may use this conclusion only when the manifest is ready, all required review passes are current and clean, and the report binds to the same exact `HEAD`:
+5. Invoke the exact-SHA launcher with the emitted manifest; it must succeed before any clean conclusion:
+
+   ```sh
+   STEWARD_POLICY_ROOT=/private/steward-os/policy \
+     python3 scripts/steward_llm_review.py --repo-dir /path/to/repository \
+     --manifest <emitted manifest>
+   ```
+
+   Validate the launcher output paths and artifacts against the same manifest bindings. Every lane requires a current, valid exact-SHA primary artifact. `deep` and `visual` additionally require a current, valid exact-SHA adversarial artifact; `fast` permits only the primary artifact. Do not substitute manual review notes, a Markdown report, or runner evidence for launcher artifacts.
+6. Inspect the deterministic evidence in every manifest command result and skipped check. Inspect the diff and changed paths, repository instructions, and relevant implementation and test paths. If a current PR exists, inspect its current checks and comments as read-only evidence.
+7. Perform the **primary review** for the selected lane. Validate the changed behavior, tests, security and compatibility implications, and the evidence against the exact manifest state.
+8. When the selected lane is `deep` or `visual`, perform a distinct, independent **adversarial review** after the primary pass. Re-examine the highest-risk paths and actively seek failures the primary pass may have missed. For visual work, inspect the rendered or visual evidence when the configured deterministic evidence provides it.
+9. Write one local-only Markdown report outside the public checkout. Include the exact repository, branch, base SHA, merge-base SHA, head SHA, `config_revision` (configuration revision), lane, manifest path, command and skipped-check evidence, launcher artifact paths, inspected diff/paths/instructions, PR checks/comments when applicable, primary-review findings, adversarial-review findings when required, and rejected or stale findings. The manual Markdown is supplemental to the launcher artifacts.
+10. A clean report may use this conclusion only when the manifest is ready, the required launcher artifacts for its lane are current and clean, all required review passes are current and clean, and the report binds to the same exact `HEAD`:
 
    ```text
    No verified blocker found in this Steward pass.

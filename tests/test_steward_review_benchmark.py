@@ -231,6 +231,11 @@ class StewardReviewBenchmarkTests(unittest.TestCase):
             "process cleanup and status propagation",
             "probe_id",
             "passed/not-applicable with evidence",
+            "steward_llm_review.py --repo-dir",
+            "--manifest <emitted manifest>",
+            "exact-SHA primary artifact",
+            "exact-SHA adversarial artifact",
+            "manual Markdown is supplemental",
         ]
         for term in required_terms:
             with self.subTest(term=term):

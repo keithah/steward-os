@@ -422,6 +422,28 @@ class StewardReviewTests(unittest.TestCase):
         self.assertIn("policy override must not traverse a symlink", result.stderr)
         self.assertFalse((self.root / "global-manifests").exists())
 
+    def test_rejects_nonregular_policy_repository_override_before_manifest_write(self):
+        for target_kind in ("directory", "fifo"):
+            with self.subTest(target_kind=target_kind):
+                policy_root = self.root / f"policy-{target_kind}"
+                policy_root.mkdir(mode=0o700)
+                policy_root.chmod(0o700)
+                self.write_policy(policy_root)
+                overrides = policy_root / "overrides"
+                overrides.mkdir(mode=0o700)
+                overrides.chmod(0o700)
+                override = overrides / "acme__widget.json"
+                if target_kind == "directory":
+                    override.mkdir(mode=0o700)
+                else:
+                    os.mkfifo(override)
+
+                result = self.run_runner(env=self.ready_env(policy_root))
+
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("policy override must be a regular file", result.stderr)
+                self.assertFalse((self.root / "global-manifests").exists())
+
     def test_rejects_executable_global_policy(self):
         policy_root = self.policy_root()
         self.write_policy(policy_root, mutate=lambda policy: policy["review"].update(commands=[{"id": "test", "command": "true", "execution": "safe"}]))
