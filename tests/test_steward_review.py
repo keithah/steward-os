@@ -194,8 +194,8 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(conflicting.returncode, 2)
         self.assertIn("not allowed with argument", conflicting.stderr)
 
-    def test_blocks_builtin_default_without_project_quality_evidence(self):
-        """No-config evidence cannot be mistaken for a complete PR gate."""
+    def test_allows_builtin_default_without_project_quality_evidence(self):
+        """Origin-derived defaults remain a usable PR gate without an override."""
         state_root = self.root / "default-state"
         result = subprocess.run(
             [
@@ -208,7 +208,7 @@ class StewardReviewTests(unittest.TestCase):
             capture_output=True,
         )
 
-        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
         manifest_path = Path(result.stdout.strip())
         self.assertTrue(manifest_path.is_file())
         manifest = json.loads(manifest_path.read_text())
@@ -217,8 +217,8 @@ class StewardReviewTests(unittest.TestCase):
         self.assertEqual(manifest["lane"], "deep")
         self.assertEqual(manifest["commands"], [])
         self.assertEqual(manifest["config_source"], "builtin-default")
-        self.assertEqual(manifest["status"], "blocked")
-        self.assertEqual(manifest["evidence_gaps"], ["no repository-specific review configuration"])
+        self.assertEqual(manifest["status"], "ready")
+        self.assertEqual(manifest["evidence_gaps"], [])
         self.assertEqual(state_root.stat().st_mode & 0o777, 0o700)
 
     def test_builtin_default_uses_a_private_runtime_subdirectory(self):
@@ -239,7 +239,7 @@ class StewardReviewTests(unittest.TestCase):
         )
 
         state_root = home / ".config" / "steward-os" / "runtime"
-        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(state_root.stat().st_mode & 0o777, 0o700)
         self.assertTrue(list((state_root / "manifests").rglob("*.json")))
 
@@ -260,10 +260,10 @@ class StewardReviewTests(unittest.TestCase):
             capture_output=True,
         )
 
-        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
         manifest = json.loads(Path(result.stdout.strip()).read_text())
         self.assertEqual(manifest["config_source"], "builtin-default")
-        self.assertEqual(manifest["status"], "blocked")
+        self.assertEqual(manifest["status"], "ready")
 
     def test_rejects_builtin_state_root_inside_reviewed_checkout(self):
         """The environment override cannot make zero-config state repo-controlled."""
