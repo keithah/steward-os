@@ -755,6 +755,40 @@ class StewardLlmReviewTests(unittest.TestCase):
         self.assertIn("normalized strings within their byte bounds", prompt["instructions"])
         self.assertIn("exact keys must be", prompt["instructions"])
 
+    def test_plex_monitoring_paths_require_defect_class_probes(self):
+        reviewer = self.manifest["required_reviewers"]["primary"]
+        context = {
+            "repository": "acme/widget", "branch": "feature/exact-state", "head_sha": self.head_sha,
+            "base_sha": self.base_sha, "merge_base_sha": self.merge_base_sha,
+            "config_revision": self.config_revision, "diff": "committed diff",
+            "changed_paths": [
+                "internal/cli/root.go", "internal/connectioncache/cache.go",
+                "internal/monitor/monitor.go", "internal/plexauth/client.go",
+            ],
+        }
+
+        primary_prompt = json.loads(self.review_module._prompt("primary", reviewer, context))
+        adversarial_prompt = json.loads(self.review_module._prompt(
+            "adversarial", self.manifest["required_reviewers"]["adversarial_candidates"][0], context
+        ))
+
+        self.assertIn("plex.identityless-profile-selection", primary_prompt["instructions"])
+        self.assertIn("plex.cache-legacy-migration", primary_prompt["instructions"])
+        self.assertIn("plex.monitor-classification-correlation", adversarial_prompt["instructions"])
+        self.assertIn("plex.discovery-same-key-refresh", adversarial_prompt["instructions"])
+
+        artifact = {
+            "repository": "acme/widget", "head_sha": self.head_sha, "base_sha": self.base_sha,
+            "merge_base_sha": self.merge_base_sha, "config_revision": self.config_revision,
+            "role": "primary", "provider": reviewer["provider"], "model": reviewer["model"],
+            "status": "complete", "findings": [],
+            "probes": [{"probe_id": probe_id, "status": "passed", "evidence": "checked"}
+                       for probe_id, _ in self.review_module._ROLE_PROBES["primary"]],
+            "limitations": [],
+        }
+        with self.assertRaisesRegex(self.review_module.ReviewError, "complete role probes coverage required"):
+            self.review_module.validate_artifact(artifact, "primary", reviewer, context)
+
     def test_rejects_oversized_reviewer_stdout_before_artifact_parsing_or_persistence(self):
         result = self.run_orchestrator("writes-oversized-stdout")
 

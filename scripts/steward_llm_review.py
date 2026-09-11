@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -12,6 +13,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import steward_review
@@ -93,6 +95,45 @@ _ROLE_PROBES = {
         ),
     ),
 }
+_SEMANTIC_PATH_PROBES = (
+    (
+        "internal/cli/**",
+        "primary",
+        "plex.identityless-profile-selection",
+        "configured server selection by machine identifier, stored map key, and display name",
+    ),
+    (
+        "internal/connectioncache/**",
+        "primary",
+        "plex.cache-legacy-migration",
+        "legacy serialized cache write/reopen retention and bounded fallback ordering",
+    ),
+    (
+        "internal/monitor/**",
+        "adversarial",
+        "plex.monitor-classification-correlation",
+        "HTTP classification and correlation inputs; local configuration failures must not imply dependency failure",
+    ),
+    (
+        "internal/plexauth/**",
+        "adversarial",
+        "plex.discovery-same-key-refresh",
+        "forced completion ordering for concurrent same-key refreshes and retained prior snapshots",
+    ),
+)
+
+
+def _role_probes(role: str, changed_paths: Optional[list[str]] = None) -> tuple:
+    """Return base probes plus path-selected semantic contracts for this exact diff."""
+    probes = list(_ROLE_PROBES[role])
+    for pattern, target_role, probe_id, description in _SEMANTIC_PATH_PROBES:
+        if target_role == role and any(
+            fnmatch.fnmatchcase(path, pattern) for path in changed_paths or ()
+        ):
+            probes.append((probe_id, description))
+    return tuple(probes)
+
+
 _ARTIFACT_KEYS = {
     "repository",
     "head_sha",
@@ -200,6 +241,7 @@ def _policy_context(repo_dir: Path) -> dict:
         "config_revision": steward_review._config_revision(config),
         "report_root": report_root.resolve(),
         "lane": lane,
+        "changed_paths": changed_paths,
         "reviewers": steward_review.required_reviewer_contracts(lane, config["review"]),
         "manifest_path": steward_review.manifest_path(
             manifest_root.resolve(), repository, branch, head_sha
@@ -268,8 +310,16 @@ def load_context(repo_dir: Path, manifest_path: Path, policy: dict) -> dict:
         raise ReviewError("base_ref does not match active global policy")
     if report_root != policy["report_root"]:
         raise ReviewError("report_root does not match active global policy")
+    lane = manifest.get("lane")
+    changed_paths = manifest.get("changed_paths")
+    if not isinstance(changed_paths, list) or any(
+        not isinstance(path, str) or not path or path != path.strip() for path in changed_paths
+    ):
+        raise ReviewError("changed_paths invalid")
     if lane != policy["lane"]:
         raise ReviewError("lane does not match active global policy")
+    if changed_paths != policy["changed_paths"]:
+        raise ReviewError("changed_paths do not match active global policy")
     if reviewers != policy["reviewers"]:
         raise ReviewError("reviewer contracts do not match active global policy")
     if manifest.get("config_revision") != policy["config_revision"]:
@@ -291,6 +341,7 @@ def load_context(repo_dir: Path, manifest_path: Path, policy: dict) -> dict:
         ),
         "report_root": report_root,
         "lane": lane,
+        "changed_paths": changed_paths,
         "roles": roles,
         "reviewers": reviewers,
     }
@@ -354,7 +405,8 @@ def _prompt(role: str, reviewer: dict, context: dict) -> str:
                 "Unconditionally record exactly one outcome for every checklist ID. Review "
                 "every role-specific checklist item, using its stable ID: "
                 + "; ".join(
-                    f"{probe_id}: {description}" for probe_id, description in _ROLE_PROBES[role]
+                    f"{probe_id}: {description}"
+                    for probe_id, description in _role_probes(role, context.get("changed_paths"))
                 )
                 + "."
             ),
@@ -430,7 +482,8 @@ def validate_artifact(artifact: dict, role: str, reviewer: dict, context: dict) 
             raise ReviewError(f"{key} must be a list")
     if len(artifact["findings"]) > _MAX_FINDINGS:
         raise ReviewError("findings exceeds limit")
-    if len(artifact["probes"]) > len(_ROLE_PROBES[role]):
+    role_probes = _role_probes(role, context.get("changed_paths"))
+    if len(artifact["probes"]) > len(role_probes):
         raise ReviewError("probes exceeds limit")
     if len(artifact["limitations"]) > _MAX_LIMITATIONS:
         raise ReviewError("limitations exceeds limit")
@@ -438,7 +491,7 @@ def validate_artifact(artifact: dict, role: str, reviewer: dict, context: dict) 
         _require_normalized_string(limitation, "limitation")
         if len(limitation.encode("utf-8")) > _MAX_LIMITATION_BYTES:
             raise ReviewError("limitation exceeds limit")
-    valid_probe_ids = {probe_id for probe_id, _ in _ROLE_PROBES[role]}
+    valid_probe_ids = {probe_id for probe_id, _ in role_probes}
     for finding in artifact["findings"]:
         if not isinstance(finding, dict) or set(finding) != {"probe_id"}:
             raise ReviewError("finding schema mismatch")
