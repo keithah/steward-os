@@ -521,11 +521,7 @@ def main() -> int:
                 "config_source": config_source,
                 "status": "ready",
                 "lane": select_lane(manifest["changed_paths"], config["review"]),
-                "evidence_gaps": (
-                    ["no repository-specific review configuration"]
-                    if config_source == "builtin-default"
-                    else []
-                ),
+                "evidence_gaps": [],
             }
         )
         manifest["commands"], manifest["skipped_checks"] = run_commands(
