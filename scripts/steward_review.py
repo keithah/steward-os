@@ -6,6 +6,7 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,14 @@ _ORIGIN_PATTERNS = (
     re.compile(r"ssh://git@github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?"),
 )
 _CAPTURE_LIMIT = 16_384
+REVIEWER_ROLES = ("primary", "adversarial")
+REVIEWER_POLICY_KEYS = ("primary", "adversarial_candidates")
+LANE_REVIEWER_ROLES = {
+    "fast": ("primary",),
+    "deep": REVIEWER_ROLES,
+    "visual": REVIEWER_ROLES,
+}
+REVIEWER_CONTRACT_VERSION = "1"
 
 
 def _require_keys(value, allowed, required, label):
@@ -53,6 +62,39 @@ def _require_string_list(value, label):
         raise ReviewError(f"{label} must be a list")
     for index, item in enumerate(value):
         _require_nonblank_string(item, f"{label}[{index}]")
+
+
+def validate_reviewers(review: dict) -> dict:
+    """Validate the required reviewer roles when a contract is configured."""
+    reviewers = review["reviewers"]
+    _require_keys(
+        reviewers,
+        set(REVIEWER_POLICY_KEYS),
+        set(REVIEWER_POLICY_KEYS),
+        "review.reviewers",
+    )
+    for role in ("primary",):
+        _require_keys(
+            reviewers[role],
+            {"provider", "model"},
+            {"provider", "model"},
+            f"review.reviewers.{role}",
+        )
+        _require_nonblank_string(
+            reviewers[role]["provider"], f"review.reviewers.{role}.provider"
+        )
+        _require_nonblank_string(
+            reviewers[role]["model"], f"review.reviewers.{role}.model"
+        )
+    candidates = reviewers["adversarial_candidates"]
+    if not isinstance(candidates, list) or not candidates:
+        raise ReviewError("review.reviewers.adversarial_candidates must be a non-empty list")
+    for index, candidate in enumerate(candidates):
+        label = f"review.reviewers.adversarial_candidates[{index}]"
+        _require_keys(candidate, {"provider", "model"}, {"provider", "model"}, label)
+        _require_nonblank_string(candidate["provider"], f"{label}.provider")
+        _require_nonblank_string(candidate["model"], f"{label}.model")
+    return reviewers
 
 
 def _is_inside(path, directory):
@@ -93,29 +135,19 @@ def _origin_repository(repo_dir: Path) -> str:
         raise ReviewError(f"git command failed: {message}") from error
 
 
-def resolve_config_path(config_dir: Path, repo_dir: Path) -> Optional[Path]:
-    """Run a Steward review helper."""
-    repository = _origin_repository(repo_dir)
-    owner, name = repository.split("/", 1)
-    path = config_dir / f"{owner}__{name}.json"
-    if not path.is_file():
-        return None
-    return path
-
-
 def _default_base_ref(repo_dir: Path) -> str:
-    """Choose the checked-out repository's remote default branch without fetching."""
+    """Choose a remote-tracking default base before any same-named local branch."""
     remote_head = subprocess.run(
         ["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
         cwd=repo_dir,
         text=True,
         capture_output=True,
     )
-    candidates = []
+    candidates = ["origin/main", "origin/master"]
     if remote_head.returncode == 0 and remote_head.stdout.strip().startswith("origin/"):
-        candidates.append(remote_head.stdout.strip().removeprefix("origin/"))
+        candidates.append(remote_head.stdout.strip())
     candidates.extend(("main", "master"))
-    for candidate in candidates:
+    for candidate in dict.fromkeys(candidates):
         if subprocess.run(
             ["git", "rev-parse", "--verify", "--quiet", f"{candidate}^{{commit}}"],
             cwd=repo_dir,
@@ -129,32 +161,120 @@ def _builtin_state_root() -> Path:
     """Return the private root used by the zero-configuration baseline."""
     override = os.environ.get("STEWARD_STATE_ROOT")
     if override is None:
-        return (Path.home() / ".config" / "steward-os" / "runtime").resolve()
+        return Path.home() / ".config" / "steward-os" / "runtime"
     root = Path(override)
     if not root.is_absolute():
         raise ReviewError("STEWARD_STATE_ROOT must be absolute")
-    return root.resolve()
+    return root
 
 
 def _prepare_builtin_state_root(repo_dir: Path) -> Path:
     """Create a private baseline root without altering any existing directory."""
     state_root = _builtin_state_root()
-    if _is_inside(state_root, repo_dir):
+    validate_lexical_path(state_root, "built-in state root")
+    resolved_state_root = state_root.resolve()
+    if _is_inside(resolved_state_root, repo_dir):
         raise ReviewError("built-in state root must be outside reviewed checkout")
-    try:
-        info = state_root.stat()
-    except FileNotFoundError:
-        try:
-            state_root.mkdir(parents=True, mode=0o700)
-        except FileExistsError:
-            return _prepare_builtin_state_root(repo_dir)
-        os.chmod(state_root, 0o700)
-        return state_root
-    if not state_root.is_dir():
-        raise ReviewError("built-in state root must be a directory")
-    if info.st_mode & 0o077:
-        raise ReviewError("existing built-in state root must be private")
+    secure_directory_chain(state_root, "built-in state root")
     return state_root
+
+
+def _require_private_directory(path: Path, label: str) -> None:
+    """Reject a symlink, foreign owner, or non-private state directory."""
+    try:
+        root_stat = path.lstat()
+    except OSError as error:
+        raise ReviewError(f"cannot inspect {label}: {error}") from error
+    if stat.S_ISLNK(root_stat.st_mode):
+        raise ReviewError(f"{label} must not traverse a symlink")
+    if (
+        not stat.S_ISDIR(root_stat.st_mode)
+        or root_stat.st_uid != os.getuid()
+        or stat.S_IMODE(root_stat.st_mode) & 0o077
+    ):
+        raise ReviewError(f"{label} must be owner-private")
+
+
+def validate_lexical_path(path: Path, label: str) -> None:
+    """Reject symlinks in every existing lexical component before resolution."""
+    for current in _lexical_path_components(path):
+        try:
+            current_stat = current.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            raise ReviewError(f"cannot inspect {label}: {error}") from error
+        if stat.S_ISLNK(current_stat.st_mode):
+            raise ReviewError(f"{label} must not traverse a symlink")
+
+
+def _lexical_path_components(path: Path):
+    """Yield lexical path prefixes from root through leaf without resolving them."""
+    if path.is_absolute():
+        current = Path(path.anchor)
+        parts = path.parts[1:]
+    else:
+        current = Path(".")
+        parts = path.parts
+    yield current
+    for part in parts:
+        current /= part
+        yield current
+
+
+def secure_directory_chain(root: Path, label: str) -> None:
+    """Create every missing private state component and validate existing ones unchanged."""
+    missing = []
+    current = root
+    while True:
+        try:
+            current.lstat()
+        except FileNotFoundError:
+            missing.append(current)
+            if current.parent == current:
+                raise ReviewError(f"cannot locate existing parent for {label}")
+            current = current.parent
+            continue
+        except OSError as error:
+            raise ReviewError(f"cannot inspect {label}: {error}") from error
+        _require_private_directory(current, label)
+        break
+    for directory in reversed(missing):
+        try:
+            directory.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+        except OSError as error:
+            raise ReviewError(f"cannot create {label}: {error}") from error
+        _require_private_directory(directory, label)
+    current = root
+    while current.parent != current:
+        parent = current.parent
+        try:
+            parent_stat = parent.lstat()
+        except OSError as error:
+            raise ReviewError(f"cannot inspect {label}: {error}") from error
+        if not stat.S_ISDIR(parent_stat.st_mode):
+            raise ReviewError(f"{label} must not traverse a symlink or non-directory")
+        if parent_stat.st_uid == os.getuid() and not stat.S_IMODE(parent_stat.st_mode) & 0o077:
+            current = parent
+            continue
+        try:
+            grandparent_stat = parent.parent.lstat()
+        except OSError as error:
+            raise ReviewError(f"cannot inspect {label}: {error}") from error
+        if (
+            stat.S_ISDIR(grandparent_stat.st_mode)
+            and grandparent_stat.st_uid == os.getuid()
+            and not stat.S_IMODE(grandparent_stat.st_mode) & 0o077
+        ):
+            raise ReviewError(f"{label} must be owner-private")
+        break
+
+
+def prepare_private_state_root(root: Path, label: str) -> None:
+    """Create a private state root and every missing component beneath its private parent."""
+    secure_directory_chain(root, label)
 
 
 def builtin_config(repo_dir: Path) -> dict:
@@ -173,6 +293,14 @@ def builtin_config(repo_dir: Path) -> dict:
             "sensitive_paths": ["**"],
             "visual_paths": [],
             "deep_paths": ["**"],
+            "reviewers": {
+                "primary": {"provider": "openai-codex", "model": "gpt-6-astra"},
+                "adversarial_candidates": [
+                    {"provider": "anthropic", "model": "claude-opus-4-6"},
+                    {"provider": "xai-oauth", "model": "grok-4.6"},
+                    {"provider": "opencode-zen", "model": "muse-spark-1.3-contributor-free"},
+                ],
+            },
             "execute_contributor_code": False,
             "sandbox_available": False,
             "command_timeout_seconds": 300,
@@ -182,12 +310,14 @@ def builtin_config(repo_dir: Path) -> dict:
     }
 
 
-def load_config(path: Path, repo_dir: Path) -> dict:
-    """Run a Steward review helper."""
-    try:
-        config = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as error:
-        raise ReviewError(f"cannot read configuration: {error}") from error
+def load_config(path: Path, repo_dir: Path, config: Optional[dict] = None) -> dict:
+    """Validate a private review configuration object against its checked-out origin."""
+    if config is None:
+        try:
+            config = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as error:
+            raise ReviewError(f"cannot read configuration: {error}") from error
+    assert config is not None
 
     _require_keys(config, {"repository", "paths", "review"}, {"repository", "paths", "review"}, "configuration")
 
@@ -207,6 +337,7 @@ def load_config(path: Path, repo_dir: Path) -> dict:
         root = Path(paths[name])
         if not root.is_absolute():
             raise ReviewError(f"paths.{name} must be absolute")
+        validate_lexical_path(root, f"paths.{name}")
         resolved_root = root.resolve()
         if _is_inside(resolved_root, reviewed_checkout):
             raise ReviewError(f"paths.{name} must be outside reviewed checkout")
@@ -219,13 +350,17 @@ def load_config(path: Path, repo_dir: Path) -> dict:
         "sensitive_paths",
         "visual_paths",
         "deep_paths",
+        "reviewers",
         "execute_contributor_code",
         "sandbox_available",
         "command_timeout_seconds",
         "safe_commands_execute_reviewed_code",
         "commands",
     }
-    _require_keys(review, review_keys, review_keys, "review")
+    required_review_keys = review_keys - {"reviewers"}
+    _require_keys(review, review_keys, required_review_keys, "review")
+    if "reviewers" in review:
+        validate_reviewers(review)
     for name in ("sensitive_paths", "visual_paths", "deep_paths"):
         _require_string_list(review[name], f"review.{name}")
     for name in (
@@ -261,6 +396,113 @@ def load_config(path: Path, repo_dir: Path) -> dict:
             raise ReviewError("safe commands that execute reviewed code require a sandbox runtime")
 
     return config
+
+
+def _private_policy_root(repo_dir: Path) -> Optional[Path]:
+    """Resolve and validate the optional owner-private global policy root."""
+    configured = os.environ.get("STEWARD_POLICY_ROOT")
+    if configured is None:
+        return None
+    root = Path(configured)
+    if not root.is_absolute():
+        raise ReviewError("STEWARD_POLICY_ROOT must be absolute")
+    validate_lexical_path(root, "STEWARD_POLICY_ROOT")
+    root = root.resolve()
+    if _is_inside(root, repo_dir.resolve()):
+        raise ReviewError("STEWARD_POLICY_ROOT must be outside reviewed checkout")
+    try:
+        root_stat = root.stat()
+    except OSError as error:
+        raise ReviewError(f"cannot inspect STEWARD_POLICY_ROOT: {error}") from error
+    if (
+        not stat.S_ISDIR(root_stat.st_mode)
+        or root_stat.st_uid != os.getuid()
+        or stat.S_IMODE(root_stat.st_mode) & 0o077
+    ):
+        raise ReviewError("STEWARD_POLICY_ROOT must be owner-private")
+    return root
+
+
+def _read_policy_json(path: Path, label: str) -> dict:
+    """Read a private policy file and reject non-object or malformed contents."""
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise ReviewError(f"cannot read {label}: {error}") from error
+    if not isinstance(value, dict):
+        raise ReviewError(f"{label} must be an object")
+    return value
+
+
+def _global_policy_config(policy_root: Path, repo_dir: Path) -> dict:
+    """Build validated configuration from origin-derived identity and owner policy."""
+    policy_path = policy_root / "policy.json"
+    validate_lexical_path(policy_path, "global policy")
+    policy_path = policy_path.resolve()
+    if not _is_inside(policy_path, policy_root) or not policy_path.is_file():
+        raise ReviewError("STEWARD_POLICY_ROOT must contain policy.json")
+    policy = _read_policy_json(policy_path, "global policy")
+    _require_keys(policy, {"paths", "review"}, {"paths", "review"}, "global policy")
+    repository_id = _origin_repository(repo_dir)
+    config = {
+        "repository": {"id": repository_id},
+        "paths": policy["paths"],
+        "review": policy["review"],
+    }
+    override_path = policy_root / "overrides" / f"{repository_id.replace('/', '__')}.json"
+    validate_lexical_path(override_path, "policy override")
+    try:
+        override_stat = override_path.lstat()
+    except FileNotFoundError:
+        override_stat = None
+    except OSError as error:
+        raise ReviewError(f"cannot inspect policy override: {error}") from error
+    if override_stat is not None:
+        if not stat.S_ISREG(override_stat.st_mode):
+            raise ReviewError("policy override must be a regular file")
+        override = _read_policy_json(override_path, "policy override")
+        _require_keys(override, {"base_ref", "review"}, set(override), "policy override")
+        if "base_ref" in override:
+            _require_nonblank_string(override["base_ref"], "policy override.base_ref")
+            config["repository"]["base_ref"] = override["base_ref"]
+        if "review" in override:
+            review_override = override["review"]
+            allowed = {"sensitive_paths", "visual_paths", "deep_paths"}
+            _require_keys(review_override, allowed, set(review_override), "policy override review")
+            for name, value in review_override.items():
+                _require_string_list(value, f"policy override review.{name}")
+                config["review"][name] = value
+    if "base_ref" not in config["repository"]:
+        config["repository"]["base_ref"] = _default_base_ref(repo_dir)
+    validated = load_config(policy_path, repo_dir, config=config)
+    review = validated["review"]
+    expected_reviewers = {
+        "primary": {"provider": "openai-codex", "model": "gpt-6-astra"},
+        "adversarial_candidates": [
+            {"provider": "anthropic", "model": "claude-opus-4-6"},
+            {"provider": "xai-oauth", "model": "grok-4.6"},
+            {"provider": "opencode-zen", "model": "muse-spark-1.3-contributor-free"},
+        ],
+    }
+    if review.get("reviewers") != expected_reviewers:
+        raise ReviewError("global policy reviewers must pin Astra primary and the approved secondary order")
+    if review["commands"]:
+        raise ReviewError("global policy must not configure commands")
+    if (
+        review["execute_contributor_code"]
+        or review["sandbox_available"]
+        or review["safe_commands_execute_reviewed_code"]
+    ):
+        raise ReviewError("global policy must not enable reviewed-code execution")
+    return validated
+
+
+def load_global_policy(repo_dir: Path) -> Optional[dict]:
+    """Load optional global policy without making reviewed repositories policy roots."""
+    policy_root = _private_policy_root(repo_dir)
+    if policy_root is None:
+        return None
+    return _global_policy_config(policy_root, repo_dir)
 
 
 def git_state(repo_dir: Path, base_ref: str) -> dict:
@@ -321,6 +563,17 @@ def select_lane(changed_paths: list[str], review: dict) -> str:
     if matches(review["deep_paths"]) or matches(review["sensitive_paths"]):
         return "deep"
     return "fast"
+
+
+def required_reviewer_contracts(lane: str, review: dict) -> Optional[dict]:
+    """Select the configured contracts required by the selected review lane."""
+    reviewers = review.get("reviewers")
+    if reviewers is None:
+        return None
+    contracts = {"primary": reviewers["primary"]}
+    if lane != "fast":
+        contracts["adversarial_candidates"] = reviewers["adversarial_candidates"]
+    return contracts
 
 
 def _bounded_text(value: str) -> tuple[str, bool]:
@@ -457,15 +710,10 @@ def _sanitize_branch(branch: str) -> str:
 
 def write_manifest(manifest_root: Path, manifest: dict) -> Path:
     """Run a Steward review helper."""
-    owner, repository = manifest["repository"].split("/", 1)
-    branch_segment = _sanitize_branch(manifest["branch"]) if manifest["branch"] else manifest["head_sha"]
-    destination = (
-        manifest_root
-        / f"{owner}__{repository}"
-        / f"branch-{branch_segment}"
-        / f"{manifest['head_sha']}.json"
+    destination = manifest_path(
+        manifest_root, manifest["repository"], manifest["branch"], manifest["head_sha"]
     )
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    secure_directory_chain(destination.parent, "manifest destination")
     descriptor, temporary_name = tempfile.mkstemp(
         dir=destination.parent,
         prefix=f".{destination.name}.",
@@ -483,6 +731,13 @@ def write_manifest(manifest_root: Path, manifest: dict) -> Path:
     return destination
 
 
+def manifest_path(manifest_root: Path, repository: str, branch: str, head_sha: str) -> Path:
+    """Return the deterministic private manifest location for an exact review state."""
+    owner, repository_name = repository.split("/", 1)
+    branch_segment = _sanitize_branch(branch) if branch else head_sha
+    return manifest_root / f"{owner}__{repository_name}" / f"branch-{branch_segment}" / f"{head_sha}.json"
+
+
 def _config_revision(config: dict) -> str:
     """Run a Steward review helper."""
     canonical = json.dumps(config, sort_keys=True, separators=(",", ":"))
@@ -493,42 +748,48 @@ def main() -> int:
     """Run a Steward review helper."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-dir", required=True, type=Path)
-    config_group = parser.add_mutually_exclusive_group()
-    config_group.add_argument("--config", type=Path)
-    config_group.add_argument("--config-dir", type=Path)
     args = parser.parse_args()
     try:
         repo_dir = args.repo_dir.resolve()
-        config_path = args.config
-        if config_path is None and args.config_dir is not None:
-            config_path = resolve_config_path(args.config_dir, repo_dir)
-        if config_path is None:
+        config = load_global_policy(repo_dir)
+        if config is None:
             config = builtin_config(repo_dir)
             config_source = "builtin-default"
         else:
-            config_path = config_path.resolve()
-            if _is_inside(config_path, repo_dir):
-                raise ReviewError("configuration path must be outside the reviewed checkout")
-            config = load_config(config_path, repo_dir)
-            config_source = "private-override"
+            config_source = "private-global-policy"
         manifest = git_state(repo_dir, config["repository"]["base_ref"])
         if config_source == "builtin-default":
             _prepare_builtin_state_root(repo_dir)
+        for name in ("report_root", "manifest_root"):
+            prepare_private_state_root(Path(config["paths"][name]), name)
+        lane = select_lane(manifest["changed_paths"], config["review"])
+        required_reviewers = required_reviewer_contracts(lane, config["review"])
+        evidence_gaps = []
+        if required_reviewers is None:
+            evidence_gaps.append("missing required reviewer configuration")
         manifest.update(
             {
                 "base_ref": config["repository"]["base_ref"],
                 "config_revision": _config_revision(config),
                 "config_source": config_source,
+                "report_root": str(Path(config["paths"]["report_root"]).resolve()),
                 "status": "ready",
-                "lane": select_lane(manifest["changed_paths"], config["review"]),
+                "lane": lane,
+                "required_reviewers": required_reviewers,
+                "reviewer_contract_version": REVIEWER_CONTRACT_VERSION,
+                "evidence_gaps": evidence_gaps,
             }
         )
         manifest["commands"], manifest["skipped_checks"] = run_commands(
             repo_dir, config["review"]
         )
+        manifest["evidence_gaps"].extend(
+            f"{check['id']}: {check['reason']}" for check in manifest["skipped_checks"]
+        )
         manifest["post_command_state"] = post_command_state(repo_dir, manifest)
         if (
-            any(command["status"] == "failed" for command in manifest["commands"])
+            manifest["evidence_gaps"]
+            or any(command["status"] == "failed" for command in manifest["commands"])
             or manifest["post_command_state"]["status"] == "failed"
         ):
             manifest["status"] = "blocked"

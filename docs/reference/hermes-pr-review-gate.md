@@ -10,57 +10,56 @@ The Hermes PR review gate produces local-only, exact-SHA review evidence before 
 
 ## Install the public procedure
 
-Keep this repository public-safe. Store live configuration, manifests, reports, credentials, repository inventories, and host-specific paths outside the reviewed checkout and outside this repository. Configuration is optional: the runner has a safe built-in baseline for zero-setup use; its default evidence root is `~/.config/steward-os/runtime/`.
+Keep this repository public-safe. Store manifests, reports, credentials, repository inventories, and host-specific paths outside the reviewed checkout and outside this repository. No policy is required: the built-in configuration writes ready, local-only evidence under `~/.config/steward-os/runtime/`. An owner-private policy is an optional override, never a requirement.
 
 1. Make the runner available from a trusted checkout of this repository.
-2. Run it against a clean GitHub checkout. With no private configuration it discovers the local default branch, records evidence under `~/.config/steward-os/runtime/`, uses the deep lane, and runs no commands from the checkout.
-3. Optionally copy [`setup/hermes-review-config.example.json`](../../setup/hermes-review-config.example.json) to a private configuration directory when you need custom state roots, lane patterns, or trusted deterministic checks. Do not put secrets, tokens, hostnames, or live local paths in public files.
-4. Load [`skills/hermes-pr-review/SKILL.md`](../../skills/hermes-pr-review/SKILL.md) in Hermes for the review procedure.
+2. Run the collector against any clean supported-GitHub checkout. It derives `repository.id` from `origin`, discovers the local default base ref, uses the fixed approved reviewer contract, and runs no reviewed-code commands.
+3. Optionally create one owner-private directory outside every reviewed checkout, copy [`setup/hermes-review-policy.example.json`](../../setup/hermes-review-policy.example.json) to `policy.json` there, and set `STEWARD_POLICY_ROOT` to it. This owner-private override may set private report/manifest roots, base ref, and lane globs, but cannot replace repository identity, reviewers, execution flags, or commands.
+4. Optionally add `overrides/owner__repository.json` under the same private root using [`setup/hermes-review-config.example.json`](../../setup/hermes-review-config.example.json). An override may contain only `base_ref` and lane path lists. Complete per-repository configuration is forbidden.
+5. Load [`skills/hermes-pr-review/SKILL.md`](../../skills/hermes-pr-review/SKILL.md) in Hermes for the review procedure.
 
-A sanitized configuration has this complete shape:
+Reviewer provider/model identifiers are fixed contracts, not credentials: primary is ChatGPT OAuth `openai-codex`/`gpt-6-astra`. For deep and visual lanes, use the fail-closed ordered secondary candidates: Anthropic OAuth `anthropic`/`claude-opus-4-6`, then xAI OAuth `xai-oauth`/`grok-4.6`, then only free Zen `opencode-zen`/`muse-spark-1.3-contributor-free`. Paid models must never be routed through Zen. No credential value belongs in JSON.
+
+The private `policy.json` has this complete shape (the public path strings are placeholders, not usable host paths):
 
 ```json
 {
-  "repository": {
-    "id": "owner/repository",
-    "base_ref": "main"
-  },
   "paths": {
-    "report_root": "/private/steward-os/reports",
-    "manifest_root": "/private/steward-os/manifests"
+    "report_root": "<absolute-private-report-root>",
+    "manifest_root": "<absolute-private-manifest-root>"
   },
   "review": {
     "sensitive_paths": ["auth/**"],
     "visual_paths": ["web/**"],
     "deep_paths": ["src/**"],
+    "reviewers": {
+      "primary": {"provider": "openai-codex", "model": "gpt-6-astra"},
+      "adversarial_candidates": [
+        {"provider": "anthropic", "model": "claude-opus-4-6"},
+        {"provider": "xai-oauth", "model": "grok-4.6"},
+        {"provider": "opencode-zen", "model": "muse-spark-1.3-contributor-free"}
+      ]
+    },
     "execute_contributor_code": false,
     "sandbox_available": false,
     "command_timeout_seconds": 300,
     "safe_commands_execute_reviewed_code": false,
-    "commands": [
-      {
-        "id": "test",
-        "command": "python3 -m unittest",
-        "execution": "disabled"
-      }
-    ]
+    "commands": []
   }
 }
 ```
 
-The runner accepts only `safe`, `sandbox`, and `disabled` command execution modes. `safe` commands are trusted operator-configured deterministic commands and run on the host with `command_timeout_seconds`, an integer from 1 through 3600. Set `safe_commands_execute_reviewed_code` to `true` when a safe command would import, execute, or otherwise run files from the reviewed checkout; this runner rejects that configuration until a locked-down sandbox runtime is integrated. A contributor does not gain host execution by changing the repository. This first public runner has no integrated sandbox runtime: a `sandbox` command remains skipped while either sandbox flag is false, and configuration is rejected if both `execute_contributor_code` and `sandbox_available` are true for a sandbox command.
-
-All state roots must be absolute, distinct, and outside the reviewed checkout. The runner accepts no environment interpolation or secret values. The `config_revision` field is the SHA-256 of the canonical JSON configuration.
+The global policy must set `commands` to `[]` and all reviewed-code execution flags to `false`; it has no integrated sandbox runtime. All state roots must be absolute, distinct, owner-owned, and outside the reviewed checkout. Every state-tree component created beneath a private root is `0700`; existing components must already be owner-private and are rejected without mode changes. The runner accepts no environment interpolation or secret values. The `config_revision` field is the SHA-256 of the canonical resolved configuration.
 
 ## Run the evidence collector
 
-From the public runner checkout, invoke the runner with a clean target repository:
+From the public runner checkout, invoke the runner with a clean target repository; no policy is required:
 
 ```sh
 python3 scripts/steward_review.py --repo-dir /path/to/repository
 ```
 
-To override the baseline, add `--config /private/steward-os/repositories/owner__repository.json` or `--config-dir /private/steward-os/repositories`. The runner refuses a dirty checkout, invalid optional configuration, a mismatched origin/config identity, state roots inside the checkout, a post-command Git-state change, or failed eligible command. Each eligible host command is bounded by `command_timeout_seconds`; a timeout is recorded as failed and produces a `blocked` manifest. It writes a manifest only after valid Git/configuration state is resolved.
+With `STEWARD_POLICY_ROOT` set, no per-repository configuration is required: the runner loads `<policy-root>/policy.json`, derives the identity from origin, and optionally reads only `<policy-root>/overrides/owner__repository.json`. It refuses a nonprivate or invalid supplied policy rather than silently falling back, including policy contents containing a repository ID, state roots inside the checkout, or any command/reviewed-code execution policy. `--config` and `--config-dir` are rejected before any manifest output or write. Without a policy, it uses the ready built-in baseline and its private runtime root. It writes a manifest only after valid Git/configuration state is resolved.
 
 The manifest is local-only JSON at:
 
@@ -68,7 +67,7 @@ The manifest is local-only JSON at:
 <manifest_root>/<owner>__<repo>/branch-<sanitized-branch>/<head_sha>.json
 ```
 
-It records the exact repository, branch, base ref, base SHA, merge-base SHA, head SHA, `config_revision`, selected lane, changed paths, command results, skipped checks, and status. Command output is bounded and records whether it was truncated.
+It records the exact repository, branch, base ref, base SHA, merge-base SHA, head SHA, `config_revision`, selected lane, changed paths, command results, skipped checks, and status. Command output is bounded and records whether it was truncated. For a clean detached-HEAD checkout, the runner records `branch` as exactly `""`; a ready manifest binds reviewer prompts and private artifact paths to its validated `head_sha` instead. Nonempty branch values remain the branch binding, and whitespace-only branches remain invalid.
 
 ## Lane behavior and Hermes review
 
@@ -76,7 +75,13 @@ It records the exact repository, branch, base ref, base SHA, merge-base SHA, hea
 - **deep:** a changed path matches a deep or sensitive pattern. Hermes performs the primary review plus a separate adversarial review.
 - **visual:** a changed path matches a visual pattern. Hermes performs the primary review plus a separate adversarial review, including visual evidence where available.
 
-Hermes reads the manifest before reviewing. A `blocked` manifest stops the procedure. For a ready manifest, Hermes inspects the diff, changed paths, repository instructions, deterministic command evidence, relevant paths, and current PR checks/comments when a PR exists. Hermes writes its Markdown report outside the public checkout, under the configured private report root, binding it to the same exact state as the manifest.
+The manifest producer selects the required lane contract from the configured OAuth-first policy: a fast manifest binds exactly the configured Astra primary role and publishes exactly one primary exact-SHA artifact. Every deep or visual manifest binds that primary plus the ordered secondary candidate list and publishes two exact-SHA artifacts bound to the same repository, configuration revision, base SHA, merge-base SHA, and head SHA. Artifacts are stored at `<report_root>/<owner>__<repo>/branch-<sanitized-branch>/<head_sha>/run-<sha256(canonical-review-run-identity)>/<role>.json`; the canonical review-run identity includes the repository, raw branch/detached discriminator, head SHA, base SHA, merge-base SHA, configuration revision, lane, and required reviewer contract/role identities; the sanitized branch remains a path-display component only. A pre-existing complete identity is rejected before any reviewer starts, while a changed base SHA, merge-base SHA, configuration revision, lane, or reviewer contract receives a distinct immutable directory. The launcher tries candidates in order and accepts only the first valid adversarial artifact; its provider and model must exactly match the candidate actually selected. Missing, extra, malformed, reordered, or substituted contracts are rejected. The Zen candidate is exclusively the free Muse Spark 1.3 fallback; paid models never route through Zen.
+
+Hermes reads the manifest before reviewing. A `blocked` manifest stops the procedure. A ready manifest must then be passed to `steward_llm_review.py --repo-dir <repository> --manifest <emitted manifest>`; the launcher must succeed and publish the lane's required exact-SHA artifacts before a clean conclusion is available. Every lane requires a valid primary artifact, while deep and visual lanes also require a valid adversarial artifact; manual Markdown is supplemental and cannot replace either required artifact. Before generating a committed diff, before launching either reviewer, between reviewer passes, and immediately before publication, it revalidates the checkout's normalized supported-GitHub `origin` repository plus its `HEAD`, configured base ref, merge base, and branch/detached binding against the manifest; any mismatch fails closed without further reviewer launch or artifact write. Each reviewer keeps private-only prompt, transcript, and artifact state outside the public checkout and GitHub. Review agents have no GitHub writes or reviewed-code execution; any future sandbox is the only boundary for executing reviewed code. The isolated reviewer receives only a bounded host-generated committed diff, manifest bindings, and its role-specific private checklist. The host excludes committed repository instruction/rule files named `AGENTS.md`, `SOUL.md`, `.cursorrules`, `.hermes.md`, and `CLAUDE.md` at the repository root and at every nested depth before sending that diff. Deterministic runner evidence remains in the manifest for the host/operator; the reviewer does not independently read repository instructions, checkout paths, or live PR checks/comments. The artifact requires structured probe outcomes with stable IDs: every role-specific checklist ID appears exactly once, findings contain only a declared `probe_id` and that probe's outcome is `finding`, and limitations are normalized bounded strings. Reviewer calls have a fixed 300-second (five-minute) bounded timeout; a timeout fails closed without retaining model stdout or private prompt content. Exact-SHA artifacts stage under one private `0700` transaction directory with owner-private `0600` files, then become consumer-visible only through one same-parent atomic directory rename. A pre-existing complete review-run identity directory is rejected before a reviewer launches; a changed freshness binding receives a distinct immutable directory. Failed staging or publication is removed without exposing a partial lane artifact set.
+
+The reviewer runs from an external private working directory with `--safe-mode --toolsets context_engine --max-turns 1 --query-file <private-prompt-path>`. `context_engine` has no static tools, and safe mode disables any plugin-provided tools, preserving a zero-tool capability surface without the comma-selector warning. The retired `--toolsets ,` selector previously resolved to an empty toolset list but emitted an unrelated selector warning; it is not used by reviewers. The private query file contains the manifest-bound diff prompt, and the host verifies the structured artifact before acceptance. The host discards only the exact local `  ⚠ tirith security scanner enabled but not available — command scanning will use pattern matching only` diagnostic line when it is the initial stdout line; it then requires exactly one JSON object, rejecting every other prefix, suffix, malformed response, or multiple object response. This enforced boundary means `isolation remediation is pending` is not a current hold. Hermes writes its review artifact outside the public checkout, under the configured private report root, binding it to the same exact state as the manifest.
+
+The private benchmark scorer receives only structured finding `probe_id` values. Its scorecard reports probe/category coverage rather than case recall: `matched_probe_ids` identifies mapped canonical probes and `candidate_case_ids_by_probe` lists corpus cases sharing each probe, while `matched_case_ids` and `missed_case_ids` remain empty because an unbound probe cannot establish a distinct historical case match. Its output must be an absolute path outside the checkout: every newly created output directory is owner-private (`0700`), existing output directories must already be owner-owned and private, and the scorer atomically writes the JSON scorecard as `0600`. It rejects non-private directories and symlink or other non-regular destination targets without changing their modes or replacing them. At scorer input only, its bounded explicit mapping expands documented role probes to canonical corpus probes: primary public-contract/compatibility, malformed/omitted/negative/timezone inputs, and error propagation; and adversarial policy/effectful sinks, token/output/redirect boundaries, cancellation/partial-success compensation, writers/shared locks, pagination snapshots/changed totals, ordering/deduplication, ambient credentials/caller authorization, and process cleanup/status propagation. The reviewer artifact schema and prompts do not expose corpus contents. Unmapped finding IDs remain unexpected findings; the scorer does not perform fuzzy matching.
 
 A clean conclusion is permitted only for a ready, complete, current review:
 
@@ -86,7 +91,7 @@ No verified blocker found in this Steward pass.
 
 ## `steward` and `run steward`
 
-`steward` is the terminal entrypoint. It runs the local runner first, using the safe built-in baseline when no per-repository override exists; only a ready manifest may be passed to Hermes for the public `hermes-pr-review` procedure. It must not use GitHub write operations.
+`steward` is the terminal entrypoint. It runs the local runner first, using the ready built-in baseline unless `STEWARD_POLICY_ROOT` configures an owner-private override; only a ready manifest may be passed to Hermes for the public `hermes-pr-review` procedure. The launcher uses the same current built-in or optional-policy configuration and accepts only its deterministic manifest location for the checkout origin, branch, and exact HEAD. It must not use GitHub write operations.
 
 `run steward` is the chat invocation of the same gate on the current committed branch. Hermes runs the local runner, reads the resulting manifest, and follows the public procedure. It is read-only with respect to GitHub objects and writes only its local report outside the public checkout.
 

@@ -1,0 +1,222 @@
+[
+  {
+    "id": "capability-boundary-shell-action",
+    "source": {"repository": "keithah/kvmctl", "pr": 15},
+    "revision": "e4d6a31bdc258c219395993fa76f9fb4bd6f85a2",
+    "language": "go",
+    "defect_class": "capability-boundary",
+    "hypothesis": "An effectful action must enforce its capability boundary at the sink.",
+    "expected_probes": ["capability.effectful-sink", "capability.denied-action"],
+    "severity": "high",
+    "disposition": "remediated"
+  },
+  {
+    "id": "credential-egress-auth-callback",
+    "source": {"repository": "keithah/gumroad-mcp", "pr": 10},
+    "revision": "0ecd05a97a3cdc997e4c9094778c4c7b3d8489ed",
+    "language": "go",
+    "defect_class": "credential-egress",
+    "hypothesis": "Credentials must not cross an output or callback boundary.",
+    "expected_probes": ["credential.output-boundary", "credential.redirect-boundary"],
+    "severity": "critical",
+    "disposition": "remediated"
+  },
+  {
+    "id": "cancellation-compensation-worker",
+    "source": {"repository": "keithah/matrix-airbnb", "pr": 41},
+    "revision": "617b538542f4bff5a2d7e957546114ccdd50d4f7",
+    "language": "go",
+    "defect_class": "cancellation-compensation",
+    "hypothesis": "Cancellation after partial success must compensate completed work.",
+    "expected_probes": ["cancellation.compensation", "cancellation.partial-success"],
+    "severity": "high",
+    "disposition": "remediated"
+  },
+  {
+    "id": "state-lock-recovery-history",
+    "source": {"repository": "keithah/plexctl", "pr": 9},
+    "revision": "4516177b7aca5e12e1fd3c308a18fbbab73f83f2",
+    "language": "go",
+    "defect_class": "state-lock-recovery",
+    "hypothesis": "State writers recover shared locks after an error path.",
+    "expected_probes": ["state.all-writers", "lock.error-recovery"],
+    "severity": "high",
+    "disposition": "remediated"
+  },
+  {
+    "id": "pagination-changing-total",
+    "source": {"repository": "keithah/plexctl", "pr": 10},
+    "revision": "cc8c51a0fce047fc6ec3448ba02f7475a353eb59",
+    "language": "go",
+    "defect_class": "snapshot-pagination",
+    "hypothesis": "Changing totals must not shift an established page boundary.",
+    "expected_probes": ["pagination.snapshot", "pagination.changed-total"],
+    "severity": "high",
+    "disposition": "remediated"
+  },
+  {
+    "id": "shape-type-time-command-input",
+    "source": {"repository": "keithah/kvmctl", "pr": 13},
+    "revision": "402e00692c8f58a55ed2209474082336c6e9756a",
+    "language": "go",
+    "defect_class": "shape-type-time-validation",
+    "hypothesis": "Malformed, omitted, negative, and time-sensitive inputs require explicit validation.",
+    "expected_probes": ["input.shape", "input.timezone", "input.negative"],
+    "severity": "medium",
+    "disposition": "remediated"
+  },
+  {
+    "id": "authorization-widening-admin-route",
+    "source": {"repository": "keithah/mediarequests", "pr": 25},
+    "revision": "103179f40345654aab7cc174522b1e9aa358a383",
+    "language": "typescript",
+    "defect_class": "authorization-widening",
+    "hypothesis": "A caller must not widen authorization beyond the intended operation.",
+    "expected_probes": ["authorization.caller-widening", "authorization.effectful-sink"],
+    "severity": "critical",
+    "disposition": "remediated"
+  },
+  {
+    "id": "process-lifecycle-server-cleanup",
+    "source": {"repository": "keithah/airbnb-api-libretto", "pr": 7},
+    "revision": "5fe14481de92841b7e40affcadf66f6c6ac57fc5",
+    "language": "typescript",
+    "defect_class": "process-lifecycle",
+    "hypothesis": "Process shutdown must clean up owned resources and preserve status.",
+    "expected_probes": ["process.cleanup", "process.status-propagation"],
+    "severity": "high",
+    "disposition": "remediated"
+  },
+  {
+    "id": "error-propagation-client-request",
+    "source": {"repository": "keithah/kvmctl", "pr": 11},
+    "revision": "d75a810dd25b6396c001b020b43dd6c5ee8a0607",
+    "language": "go",
+    "defect_class": "error-propagation",
+    "hypothesis": "A failing dependency must propagate an actionable error to the caller.",
+    "expected_probes": ["error.caller-propagation", "error.status-propagation"],
+    "severity": "medium",
+    "disposition": "remediated"
+  },
+  {
+    "id": "capability-boundary-workflow-command",
+    "source": {"repository": "keithah/openwrt-wattline", "pr": 3},
+    "revision": "a9128e2460b9e81b3e9fad7952327cb550d2cd7c",
+    "language": "yaml",
+    "defect_class": "capability-boundary",
+    "hypothesis": "Automation must restrict effectful steps to an explicit capability boundary.",
+    "expected_probes": ["capability.effectful-sink", "capability.untrusted-input"],
+    "severity": "high",
+    "disposition": "remediated"
+  },
+  {
+    "id": "credential-egress-client-auth",
+    "source": {"repository": "keithah/plexctl", "pr": 6},
+    "revision": "396bccdb83c24a7f0857cd7d391468d671d7e08c",
+    "language": "go",
+    "defect_class": "credential-egress",
+    "hypothesis": "Ambient credentials must not be forwarded to an unintended destination.",
+    "expected_probes": ["credential.ambient-source", "credential.output-boundary"],
+    "severity": "critical",
+    "disposition": "remediated"
+  },
+  {
+    "id": "cancellation-compensation-active-handler",
+    "source": {"repository": "keithah/chatbot-diatribe", "pr": 2},
+    "revision": "c2c9a9ee5ccdf32c5ea9264656b22b2299c76ecd",
+    "language": "typescript",
+    "defect_class": "cancellation-compensation",
+    "hypothesis": "Interrupted work must release partial state before returning.",
+    "expected_probes": ["cancellation.compensation", "state.error-recovery"],
+    "severity": "high",
+    "disposition": "remediated"
+  },
+  {
+    "id": "state-lock-recovery-export",
+    "source": {"repository": "keithah/plexctl", "pr": 8},
+    "revision": "05a8f83f60dabcd76f85f1a1ff5229595d886c82",
+    "language": "go",
+    "defect_class": "state-lock-recovery",
+    "hypothesis": "Every writer sharing state must retain consistent recovery behavior.",
+    "expected_probes": ["state.all-writers", "lock.error-recovery"],
+    "severity": "high",
+    "disposition": "remediated"
+  },
+  {
+    "id": "pagination-ordering-deduplication",
+    "source": {"repository": "keithah/table-reservations", "pr": 6},
+    "revision": "4e83779b1d5c50cc4c3e229159529c830f02cd60",
+    "language": "python",
+    "defect_class": "snapshot-pagination",
+    "hypothesis": "Paginated results require stable ordering and deduplication.",
+    "expected_probes": ["pagination.ordering", "pagination.deduplication"],
+    "severity": "medium",
+    "disposition": "remediated"
+  },
+  {
+    "id": "shape-type-time-config",
+    "source": {"repository": "keithah/chatbot-diatribe", "pr": 4},
+    "revision": "d50afc677436667b0560373d0d6f21ffee1fef76",
+    "language": "typescript",
+    "defect_class": "shape-type-time-validation",
+    "hypothesis": "Configuration parsing must reject malformed and omitted values before use.",
+    "expected_probes": ["input.shape", "input.omitted", "input.type"],
+    "severity": "medium",
+    "disposition": "remediated"
+  },
+  {
+    "id": "authorization-widening-share-command",
+    "source": {"repository": "keithah/plexctl", "pr": 7},
+    "revision": "d7c627090edecbf8c8db4871785e6cf1eb7821fe",
+    "language": "go",
+    "defect_class": "authorization-widening",
+    "hypothesis": "Compatibility paths must preserve the authorization contract.",
+    "expected_probes": ["authorization.compatibility-path", "authorization.caller-widening"],
+    "severity": "high",
+    "disposition": "remediated"
+  },
+  {
+    "id": "process-lifecycle-cli-exit",
+    "source": {"repository": "keithah/kvmctl", "pr": 9},
+    "revision": "eb7c61714e41458d8b1963deb534077f3d8403fc",
+    "language": "go",
+    "defect_class": "process-lifecycle",
+    "hypothesis": "CLI process completion must close resources and return the correct status.",
+    "expected_probes": ["process.cleanup", "process.status-propagation"],
+    "severity": "high",
+    "disposition": "remediated"
+  },
+  {
+    "id": "error-propagation-review-runner",
+    "source": {"repository": "keithah/steward-os", "pr": 2},
+    "revision": "19e8ed8df0e69847e7c460d82026740ed2715d64",
+    "language": "python",
+    "defect_class": "error-propagation",
+    "hypothesis": "Review command failures must surface without being converted to a clean result.",
+    "expected_probes": ["error.caller-propagation", "error.status-propagation"],
+    "severity": "high",
+    "disposition": "remediated"
+  },
+  {
+    "id": "pagination-snapshot-history-report",
+    "source": {"repository": "keithah/plexctl", "pr": 11},
+    "revision": "213650fbcc4a72cb33a825811ccedf9f2f39612a",
+    "language": "markdown",
+    "defect_class": "snapshot-pagination",
+    "hypothesis": "Reported page totals must bind to a stable snapshot.",
+    "expected_probes": ["pagination.snapshot", "pagination.changed-total"],
+    "severity": "medium",
+    "disposition": "remediated"
+  },
+  {
+    "id": "shape-type-time-route-input",
+    "source": {"repository": "keithah/chatbot-diatribe", "pr": 3},
+    "revision": "65c20de996e2af245c4d30b9cd8dba398b746f8b",
+    "language": "typescript",
+    "defect_class": "shape-type-time-validation",
+    "hypothesis": "Route inputs must validate type and time semantics at the public boundary.",
+    "expected_probes": ["input.type", "input.timezone", "input.public-contract"],
+    "severity": "medium",
+    "disposition": "remediated"
+  }
+]

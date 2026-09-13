@@ -1,0 +1,42 @@
+{
+  "paths": {
+    "report_root": "<absolute-private-report-root>",
+    "manifest_root": "<absolute-private-manifest-root>"
+  },
+  "review": {
+    "sensitive_paths": [
+      "auth/**"
+    ],
+    "visual_paths": [
+      "web/**"
+    ],
+    "deep_paths": [
+      "**"
+    ],
+    "reviewers": {
+      "primary": {
+        "provider": "openai-codex",
+        "model": "gpt-6-astra"
+      },
+      "adversarial_candidates": [
+        {
+          "provider": "anthropic",
+          "model": "claude-opus-4-6"
+        },
+        {
+          "provider": "xai-oauth",
+          "model": "grok-4.6"
+        },
+        {
+          "provider": "opencode-zen",
+          "model": "muse-spark-1.3-contributor-free"
+        }
+      ]
+    },
+    "execute_contributor_code": false,
+    "sandbox_available": false,
+    "command_timeout_seconds": 300,
+    "safe_commands_execute_reviewed_code": false,
+    "commands": []
+  }
+}
