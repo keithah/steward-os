@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from steward_runtime.github import GitHubClient
-from steward_runtime.labels import _load_label_state, sync_labels
+from steward_runtime.labels import _load_label_state, retire_repository, sync_labels
 from steward_runtime.state import RuntimePaths
 
 
@@ -61,10 +61,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fixture", type=Path, help="use local responses only; requires --dry-run")
     parser.add_argument("--dry-run", action="store_true", help="propose actions without any GitHub or private-state write")
     parser.add_argument("--limit", type=int, help="maximum proposed or applied labels")
+    parser.add_argument("--retire-repository", metavar="OWNER/REPOSITORY", help="atomically retire one repository from label monitoring")
+    parser.add_argument("--apply", action="store_true", help="confirm the requested local repository retirement")
     arguments = parser.parse_args(argv)
     if arguments.fixture and not arguments.dry_run:
         parser.error("--fixture requires --dry-run to guarantee no GitHub write")
+    if arguments.retire_repository:
+        if arguments.fixture or arguments.dry_run or arguments.limit is not None:
+            parser.error("--retire-repository cannot be combined with --fixture, --dry-run, or --limit")
+        if not arguments.apply:
+            parser.error("--retire-repository requires --apply")
     try:
+        if arguments.retire_repository:
+            paths = RuntimePaths.from_environment()
+            retire_repository(arguments.retire_repository, paths.label_state_json)
+            print(
+                json.dumps(
+                    {"action": "retire_repository", "repository": arguments.retire_repository},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+            return 0
         if arguments.fixture:
             repositories, onboarded, client = load_fixture(arguments.fixture)
             with tempfile.TemporaryDirectory() as directory:

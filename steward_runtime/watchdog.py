@@ -83,7 +83,10 @@ def _live_label_names(value: object) -> set[str] | None:
 
 
 def verify_ledger_entry(
-    entry: Mapping[str, object], client: ReadOnlyGitHubClient, onboarded: set[str]
+    entry: Mapping[str, object],
+    client: ReadOnlyGitHubClient,
+    onboarded: set[str],
+    retired_repositories: set[str] | None = None,
 ) -> list[dict[str, str]]:
     """Re-fetch one ledgered PR and return only red discrepancies.
 
@@ -91,6 +94,7 @@ def verify_ledger_entry(
     GitHub state.  This function calls only ``get_json`` and makes no repair.
     """
     findings: list[dict[str, str]] = []
+    retired = retired_repositories or set()
     if not _valid_shape(entry):
         findings.append(_finding(entry, "unsupported action shape"))
 
@@ -98,13 +102,16 @@ def verify_ledger_entry(
     number = entry.get("number")
     label = entry.get("label")
     changed_lines = entry.get("changed_lines")
+    is_retired = isinstance(repository, str) and repository in retired
     if isinstance(label, str) and label not in SIZE_LABELS:
         findings.append(_finding(entry, f"off-allowlist label {label!r}"))
-    if isinstance(repository, str) and repository not in onboarded:
+    if isinstance(repository, str) and not is_retired and repository not in onboarded:
         findings.append(_finding(entry, f"repository {repository!r} is not onboarded"))
     if isinstance(label, str) and label in SIZE_LABELS and isinstance(changed_lines, int) and not isinstance(changed_lines, bool) and size_label(changed_lines) != label:
         findings.append(_finding(entry, "source mismatch: recorded changed_lines does not map to recorded label"))
 
+    if is_retired:
+        return findings
     if not _has_usable_target(entry):
         return findings
     assert isinstance(repository, str)
@@ -133,7 +140,12 @@ def verify_ledger_entry(
     return findings
 
 
-def run_watchdog(ledger_path: Path, client: ReadOnlyGitHubClient, onboarded: set[str]) -> list[dict[str, str]]:
+def run_watchdog(
+    ledger_path: Path,
+    client: ReadOnlyGitHubClient,
+    onboarded: set[str],
+    retired_repositories: set[str] | None = None,
+) -> list[dict[str, str]]:
     """Verify every JSON-lines ledger record without mutating GitHub or state."""
     if not ledger_path.exists():
         return []
@@ -148,5 +160,5 @@ def run_watchdog(ledger_path: Path, client: ReadOnlyGitHubClient, onboarded: set
             if not isinstance(entry, Mapping):
                 findings.append({"severity": "red", "reference": f"ledger line {line_number}", "reason": "unsupported action shape"})
                 continue
-            findings.extend(verify_ledger_entry(entry, client, onboarded))
+            findings.extend(verify_ledger_entry(entry, client, onboarded, retired_repositories))
     return findings

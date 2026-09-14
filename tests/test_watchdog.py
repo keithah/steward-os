@@ -187,6 +187,50 @@ class WatchdogScriptTests(unittest.TestCase):
         self.assertIn("RED Steward label watchdog: failed closed:", result.stdout)
         self.assertEqual(result.stderr, "")
 
+    def test_retired_repository_is_silent_without_a_live_read(self):
+        entry = clean_entry(
+            repository="keithah/deleted",
+            url="https://github.com/keithah/deleted/pull/1",
+        )
+        with tempfile.TemporaryDirectory() as home:
+            home_path = pathlib.Path(home)
+            state_root = home_path / ".hermes" / "steward-os"
+            state_root.mkdir(parents=True)
+            (state_root / "label-state.json").write_text(
+                json.dumps(
+                    {
+                        "onboarded_repositories": [],
+                        "retired_repositories": ["keithah/deleted"],
+                        "processed": {},
+                        "pending": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (state_root / "label-ledger.jsonl").write_text(json.dumps(entry) + "\n", encoding="utf-8")
+            bin_dir = home_path / "bin"
+            bin_dir.mkdir()
+            called = home_path / "gh-called"
+            gh = bin_dir / "gh"
+            gh.write_text("#!/bin/sh\ntouch \"$GH_CALLED\"\nexit 1\n", encoding="utf-8")
+            gh.chmod(0o755)
+
+            result = subprocess.run(
+                [sys.executable, str(WATCHDOG_SCRIPT)],
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "GH_CALLED": str(called),
+                    "HOME": home,
+                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(result.stdout, "")
+            self.assertFalse(called.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

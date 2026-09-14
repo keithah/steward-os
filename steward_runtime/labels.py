@@ -96,22 +96,28 @@ def _label_names(value: object) -> set[str]:
 
 def _load_label_state(path: Path) -> dict[str, object]:
     if not path.exists():
-        return {"onboarded_repositories": [], "processed": {}, "pending": {}}
+        return {"onboarded_repositories": [], "retired_repositories": [], "processed": {}, "pending": {}}
     with path.open(encoding="utf-8") as handle:
         state = json.load(handle)
     if not isinstance(state, dict):
         raise ValueError("label state must be a JSON object")
     onboarded = state.get("onboarded_repositories", [])
+    retired = state.get("retired_repositories", [])
     processed = state.get("processed", {})
     pending = state.get("pending", {})
     if not isinstance(onboarded, list) or not all(isinstance(repo, str) for repo in onboarded):
         raise ValueError("label state onboarded_repositories must be a list of names")
+    if not isinstance(retired, list) or not all(isinstance(repo, str) for repo in retired):
+        raise ValueError("label state retired_repositories must be a list of names")
+    if set(onboarded) & set(retired):
+        raise ValueError("label state repositories cannot be both onboarded and retired")
     if not isinstance(processed, dict):
         raise ValueError("label state processed must be an object")
     if not isinstance(pending, dict) or not all(isinstance(key, str) and isinstance(entry, Mapping) for key, entry in pending.items()):
         raise ValueError("label state pending must be an object of action records")
     return {
         "onboarded_repositories": sorted(set(onboarded)),
+        "retired_repositories": sorted(set(retired)),
         "processed": dict(processed),
         "pending": {key: dict(entry) for key, entry in pending.items()},
     }
@@ -127,6 +133,34 @@ def _exclusive_lock(path: Path) -> Iterator[None]:
     finally:
         fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)
+
+
+def _valid_repository_name(repository: str) -> bool:
+    components = repository.split("/")
+    return len(components) == 2 and all(
+        component and component.strip() == component and " " not in component for component in components
+    )
+
+
+def retire_repository(repository: str, state_path: Path) -> None:
+    """Atomically retire one repository without altering its label ledger."""
+    if not _valid_repository_name(repository):
+        raise ValueError("repository must be an OWNER/REPOSITORY name")
+    with _exclusive_lock(label_state_lock_path(state_path)):
+        state = _load_label_state(state_path)
+        pending = cast(Mapping[str, object], state["pending"])
+        if any(
+            isinstance(entry, Mapping) and entry.get("repository") == repository
+            for entry in pending.values()
+        ):
+            raise ValueError("cannot retire repository with pending label actions")
+        onboarded = set(cast(list[str], state["onboarded_repositories"]))
+        retired = set(cast(list[str], state["retired_repositories"]))
+        onboarded.discard(repository)
+        retired.add(repository)
+        state["onboarded_repositories"] = sorted(onboarded)
+        state["retired_repositories"] = sorted(retired)
+        atomic_write_json(state_path, state)
 
 
 def _all_open_pulls(repository: str, client: LabelClient) -> list[Mapping[str, object]]:

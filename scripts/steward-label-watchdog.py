@@ -72,7 +72,8 @@ def main(argv: list[str] | None = None) -> int:
             paths = RuntimePaths.from_environment()
             state = _load_label_state(paths.label_state_json)
             onboarded = set(cast(list[str], state["onboarded_repositories"]))
-            findings = run_watchdog(paths.label_ledger_jsonl, GitHubClient(), onboarded)
+            retired = set(cast(list[str], state["retired_repositories"]))
+            findings = run_watchdog(paths.label_ledger_jsonl, GitHubClient(), onboarded, retired)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"RED Steward label watchdog: failed closed: {error}")
         return 1

@@ -8,6 +8,7 @@ import json
 import sys
 from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -52,14 +53,17 @@ def main(argv: list[str] | None = None) -> int:
         with _exclusive_lock(label_state_lock_path(paths.label_state_json)):
             state = _load_label_state(paths.label_state_json)
             onboarded = set(state["onboarded_repositories"])
+            retired = set(cast(list[str], state["retired_repositories"]))
             for repository in repositories:
                 created = bootstrap_repository_labels(repository, client, apply=True)
                 labels = _repository_label_names(repository, client)
                 if not set(SIZE_LABELS).issubset(labels):
                     raise ValueError(f"bootstrap verification failed for {repository}")
                 onboarded.add(repository)
+                retired.discard(repository)
                 print(json.dumps({"repository": repository, "created": created}, sort_keys=True, separators=(",", ":")))
             state["onboarded_repositories"] = sorted(onboarded)
+            state["retired_repositories"] = sorted(retired)
             atomic_write_json(paths.label_state_json, state)
         return 0
     except (OSError, ValueError, json.JSONDecodeError) as error:

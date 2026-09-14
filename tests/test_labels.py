@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from importlib.util import module_from_spec, spec_from_file_location
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from steward_runtime.labels import bootstrap_repository_labels, desired_label_for_pr, size_label, sync_labels
@@ -111,6 +112,35 @@ class BootstrapTests(unittest.TestCase):
 
         self.assertEqual(missing, ["steward:size:M", "steward:size:L", "steward:size:XL"])
         self.assertNotIn(("keithah/example", "steward:size:S"), client.added)
+
+    def test_bootstrap_reonboards_retired_repository_by_clearing_retirement_state(self):
+        bootstrap = load_bootstrap_module()
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = pathlib.Path(directory) / "label-state.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "onboarded_repositories": [],
+                        "retired_repositories": ["keithah/revived"],
+                        "processed": {},
+                        "pending": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            paths = SimpleNamespace(label_state_json=state_path)
+            with (
+                patch.object(bootstrap.RuntimePaths, "from_environment", return_value=paths),
+                patch.object(bootstrap, "GitHubClient", return_value=object()),
+                patch.object(bootstrap, "bootstrap_repository_labels", return_value=[]),
+                patch.object(bootstrap, "_repository_label_names", return_value=set(bootstrap.SIZE_LABELS)),
+            ):
+                self.assertEqual(bootstrap.main(["keithah/revived", "--apply"]), 0)
+
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state["onboarded_repositories"], ["keithah/revived"])
+            self.assertEqual(state["retired_repositories"], [])
+
 
 class SyncTests(unittest.TestCase):
     def test_sync_rejects_malformed_totals_without_external_or_private_mutation(self):
@@ -499,6 +529,45 @@ class LabelSyncScriptTests(unittest.TestCase):
         actions = [json.loads(line) for line in result.stdout.splitlines() if line]
         self.assertLessEqual(len(actions), 6)
         self.assertEqual([action["action"] for action in actions], ["add_label"] * len(actions))
+
+    def test_retire_repository_updates_private_state_without_rewriting_ledger(self):
+        with tempfile.TemporaryDirectory() as home:
+            state_root = pathlib.Path(home) / ".hermes" / "steward-os"
+            state_root.mkdir(parents=True)
+            state_path = state_root / "label-state.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "onboarded_repositories": ["keithah/deleted", "keithah/other"],
+                        "processed": {"keithah/deleted#1": "2026-09-01T00:00:00Z"},
+                        "pending": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            ledger_path = state_root / "label-ledger.jsonl"
+            original_ledger = '{"action":"add_label","repository":"keithah/deleted"}\n'
+            ledger_path.write_text(original_ledger, encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SYNC_SCRIPT),
+                    "--retire-repository",
+                    "keithah/deleted",
+                    "--apply",
+                ],
+                capture_output=True,
+                text=True,
+                env={**os.environ, "HOME": home},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state["onboarded_repositories"], ["keithah/other"])
+            self.assertEqual(state["retired_repositories"], ["keithah/deleted"])
+            self.assertEqual(state["processed"], {"keithah/deleted#1": "2026-09-01T00:00:00Z"})
+            self.assertEqual(ledger_path.read_text(encoding="utf-8"), original_ledger)
 
 
 if __name__ == "__main__":
