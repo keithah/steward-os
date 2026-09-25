@@ -15,7 +15,7 @@ Keep this repository public-safe. Store live configuration, manifests, reports, 
 1. Make the runner available from a trusted checkout of this repository.
 2. Run it against a clean GitHub checkout. With no private configuration it discovers the local default branch, records evidence under `~/.config/steward-os/runtime/`, uses the deep lane, and runs no commands from the checkout.
 3. Optionally copy [`setup/hermes-review-config.example.json`](../../setup/hermes-review-config.example.json) to a private configuration directory when you need custom state roots, lane patterns, or trusted deterministic checks. Do not put secrets, tokens, hostnames, or live local paths in public files.
-4. Load [`skills/hermes-pr-review/SKILL.md`](../../skills/hermes-pr-review/SKILL.md) in Hermes for the review procedure.
+4. Load [`skills/hermes-pr-review/SKILL.md`](https://github.com/nesquena/steward-os/tree/main/skills/hermes-pr-review/SKILL.md) in Hermes for the review procedure.
 
 A sanitized configuration has this complete shape:
 
