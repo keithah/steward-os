@@ -22,16 +22,16 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
+
       - name: Install GitHub CLI
         run: |
           type -p curl >/dev/null || sudo apt install curl -y
@@ -40,11 +40,11 @@ jobs:
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
           sudo apt update
           sudo apt install gh -y
-      
+
       - name: Configure GitHub CLI
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
-      
+
       - name: Run PR scanner (config mode)
         if: github.event.inputs.repos == ''
         run: |
@@ -53,7 +53,7 @@ jobs:
             ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Run PR scanner (manual repos)
         if: github.event.inputs.repos != ''
         run: |
@@ -63,7 +63,7 @@ jobs:
             ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Upload scan summary
         if: always()
         uses: actions/upload-artifact@v4
