@@ -1,0 +1,10 @@
+{
+  "repositories": [
+    "keithah/steward-os"
+  ],
+  "scan": {
+    "post_comments": true,
+    "work_dir": "/tmp/steward-pr-scan",
+    "output": "~/.config/steward-os/pr-scan-summary.json"
+  }
+}
