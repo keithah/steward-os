@@ -65,7 +65,7 @@ On a finding both can check, the stricter verdict wins once reproduced. See
 No. A flake is a [defect, not noise](../lifecycle/quality-gates.md#flakes-never-tolerate-one) —
 often a real race or ordering bug in the product wearing a costume. Root-cause it. A re-run policy
 is a machine for making real bugs invisible. See also the
-[bug-shape catalog](bug-shapes.md#7-the-flake-thats-actually-a-bug).
+[bug-shape catalog](bug-shapes.md#9-the-flake-thats-actually-a-bug).
 
 ## Green CI passed — isn't that enough to merge?
 
