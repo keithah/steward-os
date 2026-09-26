@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Global steward command - scans PRs for the current repo/PR context
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STEWARD_ROOT="${STEWARD_ROOT:-$HOME/steward-os}"
+
+# Check if steward-os is installed
+if [[ ! -d "$STEWARD_ROOT" ]]; then
+    echo "Error: steward-os not found at $STEWARD_ROOT"
+    echo "Install it with: git clone https://github.com/keithah/steward-os.git $STEWARD_ROOT"
+    exit 1
+fi
+
+# Check if we're in a git repo
+if ! git rev-parse --git-dir > /dev/null 2>&1; then
+    echo "Error: not in a git repository"
+    echo "Usage: cd to a git repo and run 'steward' to scan PRs"
+    exit 1
+fi
+
+# Get the current repo
+REPO_URL=$(git remote get-url origin 2>/dev/null || echo "")
+if [[ -z "$REPO_URL" ]]; then
+    echo "Error: no 'origin' remote found"
+    exit 1
+fi
+
+# Convert to owner/repo format
+if [[ "$REPO_URL" =~ github\.com[:/]([^/]+)/([^/.]+) ]]; then
+    OWNER="${BASH_REMATCH[1]}"
+    REPO="${BASH_REMATCH[2]}"
+    REPO_FULL="$OWNER/$REPO"
+else
+    echo "Error: could not parse GitHub repository from $REPO_URL"
+    exit 1
+fi
+
+# Check if we're on a PR branch
+PR_NUMBER=""
+CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+
+# Try to detect PR number from branch name patterns
+if [[ -n "$CURRENT_BRANCH" ]]; then
+    # Common patterns: pr-123, fix/issue-123, feat/123-description
+    if [[ "$CURRENT_BRANCH" =~ pr-([0-9]+) ]]; then
+        PR_NUMBER="${BASH_REMATCH[1]}"
+    elif [[ "$CURRENT_BRANCH" =~ issue-([0-9]+) ]]; then
+        PR_NUMBER="${BASH_REMATCH[1]}"
+    elif [[ "$CURRENT_BRANCH" =~ ^([0-9]+)- ]]; then
+        PR_NUMBER="${BASH_REMATCH[1]}"
+    fi
+fi
+
+# If no PR number from branch name, try to detect via gh CLI
+if [[ -z "$PR_NUMBER" ]] && command -v gh &> /dev/null; then
+    # Check if current branch has an associated PR
+    PR_INFO=$(gh pr view --json number 2>/dev/null || echo "")
+    if [[ -n "$PR_INFO" ]]; then
+        PR_NUMBER=$(echo "$PR_INFO" | jq -r '.number' 2>/dev/null || echo "")
+    fi
+fi
+
+# Build the command
+if [[ -n "$PR_NUMBER" ]]; then
+    echo "Detected PR #$PR_NUMBER in $REPO_FULL"
+    echo "Scanning PR #$PR_NUMBER..."
+    "$STEWARD_ROOT/scripts/steward_scan_prs.py" --repos "$REPO_FULL" --pr-number "$PR_NUMBER" "$@"
+else
+    echo "Scanning all open PRs in $REPO_FULL..."
+    "$STEWARD_ROOT/scripts/steward_scan_prs.py" --repos "$REPO_FULL" "$@"
+fi
