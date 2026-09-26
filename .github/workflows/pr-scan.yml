@@ -1,7 +1,10 @@
 name: Steward PR Scan
 
+# This workflow intentionally uses pull_request_target so fork PRs can receive
+# review comments. It checks out only the trusted base branch and never executes
+# code from the PR checkout.
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
 
 jobs:
@@ -12,10 +15,12 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout trusted base branch
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5

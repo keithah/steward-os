@@ -75,7 +75,7 @@ Flags:
 
 ### GitHub Action (automatic)
 
-The included `.github/workflows/pr-scan.yml` runs automatically for each PR when it is opened, updated (`synchronize`), reopened, or marked ready for review. It scans only the triggering PR and posts the Steward review comment using the workflow's `GITHUB_TOKEN`.
+The included `.github/workflows/pr-scan.yml` runs automatically for each PR when it is opened, updated (`synchronize`), reopened, or marked ready for review. It uses `pull_request_target` so fork PRs can receive comments, but checks out only the trusted base branch and does not execute PR-authored code. The scanner fetches the PR for inspection and posts the Steward review comment using the workflow's `GITHUB_TOKEN`.
 
 No repository secret is required. The workflow grants `contents: read` and `pull-requests: write` permissions.
 

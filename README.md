@@ -157,7 +157,7 @@ python3 scripts/steward_scan_prs.py --repos owner/repo --pr-number 123 --dry-run
 python3 scripts/steward_scan_prs_config.py --config setup/pr-scan-repos.json
 ```
 
-The repository's GitHub Action runs the one-PR form automatically on every PR open, update, reopen, and ready-for-review event.
+The repository's GitHub Action runs the one-PR form automatically on every PR open, update, reopen, and ready-for-review event. It uses the trusted base branch for the workflow so fork PRs can receive comments without executing untrusted PR code.
 
 See [skills/pr-scanner/SKILL.md](skills/pr-scanner/SKILL.md) for full documentation.
 
