@@ -74,6 +74,88 @@ it's what makes running the whole thing unattended *safe*.
 
 Full map: **[docs/README.md](docs/README.md)** · Published site: **<https://nesquena.github.io/steward-os/>**
 
+## Install the PR Scanner Skill
+
+The PR scanner scans all open pull requests across your repositories, runs Steward review on each, and posts structured review comments.
+
+### Hermes Agent
+
+```bash
+# Install from this repository
+git clone https://github.com/keithah/steward-os.git /tmp/steward-os
+cp -r /tmp/steward-os/skills/pr-scanner ~/.hermes/skills/
+rm -rf /tmp/steward-os
+
+# Verify installation
+ls ~/.hermes/skills/pr-scanner/SKILL.md
+```
+
+### Claude Code
+
+```bash
+# Install to Claude Code skills directory
+git clone https://github.com/keithah/steward-os.git /tmp/steward-os
+mkdir -p ~/.claude/skills
+cp -r /tmp/steward-os/skills/pr-scanner ~/.claude/skills/
+rm -rf /tmp/steward-os
+
+# Verify installation
+ls ~/.claude/skills/pr-scanner/SKILL.md
+```
+
+### OpenAI Codex
+
+```bash
+# Install to Codex skills directory
+git clone https://github.com/keithah/steward-os.git /tmp/steward-os
+mkdir -p ~/.codex/skills
+cp -r /tmp/steward-os/skills/pr-scanner ~/.codex/skills/
+rm -rf /tmp/steward-os
+
+# Verify installation
+ls ~/.codex/skills/pr-scanner/SKILL.md
+```
+
+### OpenCode
+
+```bash
+# Install to OpenCode skills directory
+git clone https://github.com/keithah/steward-os.git /tmp/steward-os
+mkdir -p ~/.opencode/skills
+cp -r /tmp/steward-os/skills/pr-scanner ~/.opencode/skills/
+rm -rf /tmp/steward-os
+
+# Verify installation
+ls ~/.opencode/skills/pr-scanner/SKILL.md
+```
+
+### Manual Installation (Any Agent)
+
+```bash
+# Clone the repository
+git clone https://github.com/keithah/steward-os.git
+
+# Copy the skill to your agent's skills directory
+cp -r steward-os/skills/pr-scanner /path/to/your/agent/skills/
+
+# Clean up
+rm -rf steward-os
+```
+
+### Usage
+
+Once installed, the skill provides two CLI tools:
+
+```bash
+# Scan specific repositories
+python3 scripts/steward_scan_prs.py --repos owner/repo1 owner/repo2 --dry-run
+
+# Fleet-wide scan with config
+python3 scripts/steward_scan_prs_config.py --config setup/pr-scan-repos.json
+```
+
+See [skills/pr-scanner/SKILL.md](skills/pr-scanner/SKILL.md) for full documentation.
+
 ## Repository layout
 
 ```
