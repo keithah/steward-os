@@ -75,7 +75,9 @@ Flags:
 
 ### GitHub Action (automatic)
 
-The included `.github/workflows/pr-scan.yml` runs hourly and on manual dispatch. It reads `setup/pr-scan-repos.json` by default, or accepts a comma-separated repo list on manual trigger.
+The included `.github/workflows/pr-scan.yml` runs automatically for each PR when it is opened, updated (`synchronize`), reopened, or marked ready for review. It scans only the triggering PR and posts the Steward review comment using the workflow's `GITHUB_TOKEN`.
+
+No repository secret is required. The workflow grants `contents: read` and `pull-requests: write` permissions.
 
 ## Review comment format
 

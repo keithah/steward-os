@@ -202,6 +202,7 @@ def scan_repository(
     config_dir: Path | None,
     work_dir: Path,
     dry_run: bool = False,
+    pr_number: int | None = None,
 ) -> list[dict]:
     """Scan all open PRs in a repository."""
     print(f"\n{'='*60}")
@@ -217,6 +218,12 @@ def scan_repository(
     if not prs:
         print(f"✅ No open PRs found in {repo}")
         return []
+
+    if pr_number is not None:
+        prs = [pr for pr in prs if pr["number"] == pr_number]
+        if not prs:
+            print(f"✅ PR #{pr_number} is not open in {repo}")
+            return []
 
     print(f"Found {len(prs)} open PR(s)")
 
@@ -311,6 +318,11 @@ def main() -> int:
         help="Repositories to scan (owner/repo format). If not provided, reads from config.",
     )
     parser.add_argument(
+        "--pr-number",
+        type=int,
+        help="Scan only this pull request number (useful in CI pull_request events)",
+    )
+    parser.add_argument(
         "--config",
         type=Path,
         help="Path to a steward review configuration file",
@@ -363,6 +375,7 @@ def main() -> int:
             args.config_dir,
             args.work_dir,
             args.dry_run,
+            args.pr_number,
         )
         all_results.extend(results)
 

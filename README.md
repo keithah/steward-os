@@ -150,9 +150,14 @@ Once installed, the skill provides two CLI tools:
 # Scan specific repositories
 python3 scripts/steward_scan_prs.py --repos owner/repo1 owner/repo2 --dry-run
 
+# Scan one PR (used by the GitHub Action)
+python3 scripts/steward_scan_prs.py --repos owner/repo --pr-number 123 --dry-run
+
 # Fleet-wide scan with config
 python3 scripts/steward_scan_prs_config.py --config setup/pr-scan-repos.json
 ```
+
+The repository's GitHub Action runs the one-PR form automatically on every PR open, update, reopen, and ready-for-review event.
 
 See [skills/pr-scanner/SKILL.md](skills/pr-scanner/SKILL.md) for full documentation.
 
