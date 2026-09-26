@@ -25,3 +25,4 @@ standalone:
   - project-system-setup
   - coding-principles
   - hermes-pr-review
+  - pr-scanner
