@@ -9,7 +9,7 @@ on:
 
 jobs:
   scan-pr:
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     permissions:
       contents: read
       pull-requests: write
